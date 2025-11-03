@@ -189,8 +189,14 @@ __all__ = [
 
 Installation
 
+pip
 ```bash
 pip install speclike
+```
+
+github
+```bash
+pip install git+https://github.com/minoru-jp/speclike.git
 ```
 
 ---
