@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum, auto
 import sys
 from types import GenericAlias
-from typing import Any, Callable, Protocol, Self, TypeVar, get_type_hints
+from typing import Any, Callable, Generic, Protocol, Self, TypeVar, get_type_hints
 
 import inspect
 
@@ -21,6 +22,9 @@ _REF_DISPATCHER = f"_{MOD_NAME}_dispatcher"
 _NAME_ON_NS = f"_{MOD_NAME}_name_on_namespace"
 _OWNER = f"_{MOD_NAME}_owner"
 _ACT_SIGNATURE = f"_{MOD_NAME}_act_signature"
+_ACT_PARAM_NAME = f"_{MOD_NAME}_act_param_name"
+
+_ACTOR_FUNCTION_NAME = "_"
 
 class TargetKind(Enum):
     _UNDETERMINED = 0 # not used at current implementation.
@@ -38,29 +42,17 @@ class _ExActorDecorator(_TailDecorator, Protocol):
     pass
 
 
-@dataclass(slots = True)
-class _Decorator:
-    """
-    single-use decorator.
+class _AbstractPicker(ABC):
+    @abstractmethod
+    def _process_target(self, target: T) -> T | None:
+        ...
 
-    Each instance is disposable and cannot be reused once applied.  
-    A function named "_" is treated as an actor of an externally defined spec.
-    """
-    
-    label: object | None = field(default = None)
-    label_as_pytestmark: bool = field(default = False)
-    _params: tuple[tuple, dict] | None = field(init = False, default = None)
-    _ptms: list = field(init = False, default_factory = list)
-    # Lazy initialization until __call__.
-    _ref_dispatcher: Callable | None = field(init = False, default = None)
-    _returns_target_already: bool = field(init = False, default = False)
+class _TestBodyAndActorPicker(_AbstractPicker):
 
-    def __call__(self, target: T) -> T:
-        if self._returns_target_already:
-            raise RuntimeError(
-                f"Attempted to process {target.__qualname__}, "
-                f"but the decorator has already finished."
-            )
+    def __init__(self):
+        self._ref_dispatcher = None
+
+    def _process_target(self, target: T) -> T | None:
         if target.__name__ == "_":
             # If the name is "_", treat it as an actor and set reference to dispatcher.
             if self._ref_dispatcher is None:
@@ -74,22 +66,219 @@ class _Decorator:
                 )
             setattr(target, _TARGET_KIND, TargetKind.EX_SPEC_ACT)
             setattr(target, _REF_DISPATCHER, self._ref_dispatcher)
-            self._returns_target_already = True
             return target
         
+        setattr(target, _TARGET_KIND, TargetKind.INDIVIDUAL_TEST_BODY)
+        return None
+
+    def _get_ex_actor_decorator(
+        self, deco: _Decorator, ex_dispatcher: Callable
+    ) -> _ExActorDecorator:
+        m = getattr(ex_dispatcher, _TARGET_KIND, None)
+        error = m is None
+        # None leaves the result unchanged (below).
+        error |= m not in (
+            TargetKind.EX_SPEC_DISPATCHER, TargetKind.EX_SPEC_DISPATCHER_IN_CLASS
+        )
+        if error:
+            raise TypeError(
+                "ex_dispatcher function must be decorated as dispatcher. " +
+                (f"but decorated '{m.name}'." if isinstance(m, TargetKind) else "")
+            )
+        self._ref_dispatcher = ex_dispatcher
+
+        def ex_actor_decorator(target: T) -> T:
+            return deco.__call__(target)
+        
+        return ex_actor_decorator
+
+
+class Sig:
+    __slots__ = ("_parameter_defs",)
+    def __init__(self, **parameter_defs):
+        for k, v in parameter_defs.items():
+            if not (isinstance(k, str) and k.isidentifier()):
+                raise TypeError(
+                    f"Parameter name must be str and python identifier. "
+                    f"but received '{k}'."
+                )
+            if not isinstance(v, (type, GenericAlias)):
+                raise TypeError(
+                    f"Invalid type definition for act parameter '{k}': " + 
+                    f"expected a type or generic type alias (e.g. list[int]), " + 
+                    f"but received '{type(v).__name__}'."
+                )
+        self._parameter_defs = parameter_defs
+    
+    def __call__(self, *args, **kwargs):
+        """The specific signature of the act function is not provided."""
+        pass
+
+    def ensure_actor_has_correct_signature(
+        self, disp_name: str, act: Callable, actsig_formatter: Callable
+    ) -> None:
+        error_prefix = f"Invalid actor definition for '{disp_name}': "
+        sig = inspect.signature(act)
+        hints = get_type_hints(act)
+        params = list(sig.parameters.values())[1:]  # skip 'self'
+
+        # signatures string for error messages
+        # actual_sig = mcls._format_signature_with_types(act)
+        actual_sig = actsig_formatter(act)
+        expected_sig = (
+            "fn(self, " + ", ".join(
+                f"{name}: {tp.__name__}" for name, tp in self._parameter_defs.items()
+            ) + ")"
+        )
+        if expected_sig == "fn(self, )":
+            expected_sig = "fn(self)"
+
+        for i, (exp_name, exp_type) in enumerate(self._parameter_defs.items()):
+            if i >= len(params):
+                raise _ActorDefinitionError(
+                    error_prefix +
+                    f"It has fewer parameters " +
+                    f"than expected (missing index {i}).\n" +
+                    f"Expected signature: {expected_sig}\n" +
+                    f"Actual signature: {actual_sig}"
+                )
+
+            param = params[i]
+
+            # name check
+            if param.name != exp_name:
+                raise _ActorDefinitionError(
+                    error_prefix +
+                    f"Parameter name mismatch: " +
+                    f"expected '{exp_name}', but received '{param.name}'.\n" +
+                    f"Expected signature: {expected_sig}\n" +
+                    f"Actual signature: {actual_sig}"
+                )
+
+            # type check (only if act annotates it)
+            actual_type = hints.get(param.name)
+            if actual_type is not None and actual_type != exp_type:
+                raise _ActorDefinitionError(
+                    error_prefix +
+                    f"Type mismatch at parameter '{param.name}': " +
+                    f"expected '{exp_type.__name__}', " +
+                    f"but received '{actual_type.__name__}'.\n" +
+                    f"Expected signature: {expected_sig}\n" +
+                    f"Actual signature: {actual_sig}"
+                )
+        
+        if len(params) > len(self._parameter_defs):
+            extra_params = [p.name for p in params[len(self._parameter_defs):]]
+            raise _ActorDefinitionError(
+                error_prefix +
+                f"It has unexpected extra parameter(s): " +
+                f"{', '.join(extra_params)}.\n"
+                f"Expected signature: {expected_sig}\n" + 
+                f"Actual signature: {actual_sig}"
+            )
+
+
+class _DispatcherPicker(_AbstractPicker):
+    def _process_target(self, target: T) -> T | None:
+        if target.__name__ == _ACTOR_FUNCTION_NAME:
+            raise NameError(
+                "Dispatcher picker can not handle actor function."
+                f"Function name '{_ACTOR_FUNCTION_NAME}' represents actor function."
+            )        
+        sig = inspect.signature(target)
+        found_sig = False
+        for k, v in sig.parameters.items():
+            if isinstance(v.default, Sig):
+                if found_sig:
+                    raise TypeError(
+                        f"Multiple Sig found. Last one is on '{k}'."
+                    )
+                found_sig = True
+                setattr(target, _ACT_PARAM_NAME, k)
+                setattr(target, _ACT_SIGNATURE, v.default)
+        if not found_sig:
+            raise TypeError(
+                "Parameter definition for act function is not found. "
+                f"Dispatcher function must have {Sig.__name__} object as a default "
+                "on one of its parameters."
+            )
+        
+        setattr(target, _TARGET_KIND, TargetKind.EX_SPEC_DISPATCHER)
+        
+        return None
+
+_P = TypeVar("_P", bound = _AbstractPicker)
+
+class _Decorator(Generic[_P]):
+    """
+    single-use decorator.
+
+    Each instance is disposable and cannot be reused once applied.  
+    A function named "_" is treated as an actor of an externally defined spec.
+    """
+
+    def __init__(
+        self,
+        op: _P,
+        label: object | None = None,
+        label_as_pytestmark: bool = False
+    ):
+        self._op = op
+        self._label = label
+        self._label_as_pytestmark = label_as_pytestmark
+        self._params = None
+        self._ptms = []
+        # Lazy initialization until __call__.
+        # self._ref_dispatcher = None
+        self._returns_target_already = False
+        
+    # op: _AbstractPickerOperation
+    # _label: object | None = field(default = None)
+    # _label_as_pytestmark: bool = field(default = False)
+    # _params: tuple[tuple, dict] | None = field(init = False, default = None)
+    # _ptms: list = field(init = False, default_factory = list)
+    # # Lazy initialization until __call__.
+    # _ref_dispatcher: Callable | None = field(init = False, default = None)
+    # _returns_target_already: bool = field(init = False, default = False)
+
+    def __call__(self, target: T) -> T:
+        if self._returns_target_already:
+            raise RuntimeError(
+                f"Attempted to process {target.__qualname__}, "
+                f"but the decorator has already finished."
+            )
+        # if target.__name__ == "_":
+        #     # If the name is "_", treat it as an actor and set reference to dispatcher.
+        #     if self._ref_dispatcher is None:
+        #         raise RuntimeError(
+        #             f"Missing dispatcher correspond to {target.__qualname__}."
+        #         )
+        #     if hasattr(target, "pytestmark"):
+        #         raise ValueError(
+        #             f"Pytestmark can not be applied to actor. " + 
+        #             f"Actor name {target.__qualname__}"
+        #         )
+        #     setattr(target, _TARGET_KIND, TargetKind.EX_SPEC_ACT)
+        #     setattr(target, _REF_DISPATCHER, self._ref_dispatcher)
+        #     self._returns_target_already = True
+        #     return target
+        shortcut = self._op._process_target(target)
+        if shortcut is not None:
+            self._returns_target_already = True
+            return shortcut
         # Otherwise, treat it as either the individual test target or 
         # the dispatcher itself.
         self._prepare_pytestmark_attr_as_list(target)
         
-        # May have been marked by CaseBase.actsig as TargetKind.EX_SPEC_DISPATCHER
-        if not hasattr(target, _TARGET_KIND):
-            setattr(target, _TARGET_KIND, TargetKind.INDIVIDUAL_TEST_BODY)
+        # # May have been marked by CaseBase.actsig as TargetKind.EX_SPEC_DISPATCHER
+        # if not hasattr(target, _TARGET_KIND):
+        #     setattr(target, _TARGET_KIND, TargetKind.INDIVIDUAL_TEST_BODY)
         
-        if self.label_as_pytestmark and self.label is not None:
-            if isinstance(self.label, str):
-                target.pytestmark.append(getattr(pytest.mark, self.label))
+        if self._label_as_pytestmark and self._label is not None:
+            if isinstance(self._label, str):
+                target.pytestmark.append(getattr(pytest.mark, self._label))
             else:
-                target.pytestmark.append(self.label)
+                target.pytestmark.append(self._label)
         if self._params:
             setattr(target, _PARAMS_UNIT, self._params)
         target.pytestmark.extend(self._ptms)
@@ -113,24 +302,24 @@ class _Decorator:
         self._ptms.extend(pytestmark)
         return self
     
-    def _get_ex_actor_decorator(self, ex_dispatcher: Callable) -> _ExActorDecorator:
-        m = getattr(ex_dispatcher, _TARGET_KIND, None)
-        error = m is None
-        # None leaves the result unchanged (below).
-        error |= m not in (
-            TargetKind.EX_SPEC_DISPATCHER, TargetKind.EX_SPEC_DISPATCHER_IN_CLASS
-        )
-        if error:
-            raise TypeError(
-                "ex_dispatcher function must be decorated as dispatcher. " +
-                (f"but decorated '{m.name}'." if isinstance(m, TargetKind) else "")
-            )
-        self._ref_dispatcher = ex_dispatcher
+    # def _get_ex_actor_decorator(self, ex_dispatcher: Callable) -> _ExActorDecorator:
+    #     m = getattr(ex_dispatcher, _TARGET_KIND, None)
+    #     error = m is None
+    #     # None leaves the result unchanged (below).
+    #     error |= m not in (
+    #         TargetKind.EX_SPEC_DISPATCHER, TargetKind.EX_SPEC_DISPATCHER_IN_CLASS
+    #     )
+    #     if error:
+    #         raise TypeError(
+    #             "ex_dispatcher function must be decorated as dispatcher. " +
+    #             (f"but decorated '{m.name}'." if isinstance(m, TargetKind) else "")
+    #         )
+    #     self._ref_dispatcher = ex_dispatcher
 
-        def ex_actor_decorator(target: T) -> T:
-            return self.__call__(target)
+    #     def ex_actor_decorator(target: T) -> T:
+    #         return self.__call__(target)
         
-        return ex_actor_decorator
+    #     return ex_actor_decorator
 
     def _prepare_pytestmark_attr_as_list(self, target: Callable) -> None:
         ptm = getattr(target, "pytestmark", None)
@@ -140,6 +329,9 @@ class _Decorator:
         else:
             ptm = []
         setattr(target, "pytestmark", ptm)
+    
+    def _get_picker(self) -> _P:
+        return self._op
 
 class _ExSpecNamespace(dict):
     def __init__(self, cls_name: str):
@@ -187,10 +379,8 @@ class ExSpec(metaclass = _ExSpecMeta):
     """
     pass
 
-    
 
-
-class CaseBase:
+class _DecoratorCreator(Generic[_P], ABC):
     """
     Base provider of decorator instances.
 
@@ -226,111 +416,139 @@ class CaseBase:
     def ptm(self, *pytestmark) -> _Decorator:
         return self._d(None).ptm(*pytestmark)
 
-    def ex(self, ex_dispatcher: Callable) -> _ExActorDecorator:
-        return self._d(None)._get_ex_actor_decorator(ex_dispatcher)
+    # def ex(self, ex_dispatcher: Callable) -> _ExActorDecorator:
+    #     return self._d(None)._get_ex_actor_decorator(ex_dispatcher)
     
-    def actsig(self, **kwargs) -> _TailDecorator:
-        for k, v in kwargs.items():
-            if not isinstance(v, (type, GenericAlias)):
-                raise TypeError(
-                    f"Invalid type definition for act parameter '{k}': " + 
-                    f"expected a type or generic type alias (e.g. list[int]), " + 
-                    f"but received '{type(v).__name__}'."
-                )
-        def decorator(target: T) -> T:
-            setattr(target, _TARGET_KIND, TargetKind.EX_SPEC_DISPATCHER)
-            setattr(target, _ACT_SIGNATURE, kwargs)
-            return target
-        return decorator
+    # def actsig(self, **kwargs) -> _TailDecorator:
+    #     for k, v in kwargs.items():
+    #         if not isinstance(v, (type, GenericAlias)):
+    #             raise TypeError(
+    #                 f"Invalid type definition for act parameter '{k}': " + 
+    #                 f"expected a type or generic type alias (e.g. list[int]), " + 
+    #                 f"but received '{type(v).__name__}'."
+    #             )
+    #     def decorator(target: T) -> T:
+    #         setattr(target, _TARGET_KIND, TargetKind.EX_SPEC_DISPATCHER)
+    #         setattr(target, _ACT_SIGNATURE, kwargs)
+    #         return target
+    #     return decorator
     
-    def _d(self, label_object: object | None) -> _Decorator:
+    def _d(self, label_object: object | None) -> _Decorator[_P]:
         passes = self._as_pytestmark
         passes |= bool(self._passes and (label_object in self._passes))
         passes &= label_object not in self._blocks
-        return _Decorator(label_object, passes)
+        #return _Decorator(label_object, passes)
+        picker_operation = self._create_picker_operation()
+        return _Decorator[_P](picker_operation, label_object, passes)
+    
+    @abstractmethod
+    def _create_picker_operation(self) -> _P:
+        ...
+    
 
-class Case(CaseBase):
+class _LabelMixIn(Generic[_P]):
+    """Mixin for creating decorators tied to a specific label."""
+    _d: Callable[[Any], _Decorator[_P]]
+    
     __slots__ = ()
 
     @property
-    def api(self) -> _Decorator:
+    def api(self) -> _Decorator[_P]:
         return self._d("api")
 
     @property
-    def feature(self) -> _Decorator:
+    def feature(self) -> _Decorator[_P]:
         return self._d("feature")
     
     @property
-    def default(self) -> _Decorator:
+    def default(self) -> _Decorator[_P]:
         return self._d("default")
     
     @property
-    def init(self) -> _Decorator:
+    def init(self) -> _Decorator[_P]:
         return self._d("init")
     
     @property
-    def init_fail(self) ->_Decorator:
+    def init_fail(self) ->_Decorator[_P]:
         return self._d("init_fail")
     
     @property
-    def cleanup(self) -> _Decorator:
+    def cleanup(self) -> _Decorator[_P]:
         return self._d("cleanup")
     
     @property
-    def cleanup_fail(self) -> _Decorator:
+    def cleanup_fail(self) -> _Decorator[_P]:
         return self._d("cleanup_fail")
     
     @property
-    def edge(self) -> _Decorator:
+    def edge(self) -> _Decorator[_P]:
         return self._d("edge")
 
     @property
-    def edge_pass(self) -> _Decorator:
+    def edge_pass(self) -> _Decorator[_P]:
         return self._d("edge_pass")
     
     @property
-    def edge_fail(self) -> _Decorator:
+    def edge_fail(self) -> _Decorator[_P]:
         return self._d("edge_fail")
     
     @property
-    def legacy(self) -> _Decorator:
+    def legacy(self) -> _Decorator[_P]:
         return self._d("legacy")
     
     @property
-    def legacy_fail(self) -> _Decorator:
+    def legacy_fail(self) -> _Decorator[_P]:
         return self._d("legacy_fail")
     
     @property
-    def violation(self) -> _Decorator:
+    def violation(self) -> _Decorator[_P]:
         return self._d("violation")
     
     @property
-    def raises(self) -> _Decorator:
+    def raises(self) -> _Decorator[_P]:
         return self._d("raises")
     
     @property
-    def recovers(self) -> _Decorator:
+    def recovers(self) -> _Decorator[_P]:
         return self._d("recovers")
     
     @property
-    def error(self) -> _Decorator:
+    def error(self) -> _Decorator[_P]:
         return self._d("error")
     
     @property
-    def critical(self) -> _Decorator:
+    def critical(self) -> _Decorator[_P]:
         return self._d("critical")
     
     @property
-    def silent(self) -> _Decorator:
+    def silent(self) -> _Decorator[_P]:
         return self._d("silent")
     
     @property
-    def NOTE(self) -> _Decorator:
+    def NOTE(self) -> _Decorator[_P]:
         return self._d("NOTE")
     
     @property
-    def IMPORTANT(self) -> _Decorator:
+    def IMPORTANT(self) -> _Decorator[_P]:
         return self._d("IMPORTANT")
+
+class _Case(
+    _LabelMixIn[_TestBodyAndActorPicker],
+    _DecoratorCreator[_TestBodyAndActorPicker]
+):
+    def _create_picker_operation(self) -> _TestBodyAndActorPicker:
+        return _TestBodyAndActorPicker()
+    
+    def ex(self, ex_dispatcher: Callable) -> _ExActorDecorator:
+        deco = self._d(None)
+        return deco._get_picker()._get_ex_actor_decorator(deco, ex_dispatcher)
+
+class _Ex(
+    _LabelMixIn[_DispatcherPicker],
+    _DecoratorCreator[_DispatcherPicker]
+):
+    def _create_picker_operation(self) -> _DispatcherPicker:
+        return _DispatcherPicker()
 
 
 class _SpecNamespace(dict):
@@ -407,8 +625,9 @@ class _SpecMeta(type):
 
             try:
                 # passes dipatcher name for structing error message. 
-                mcls._ensure_act_has_correct_signature(
-                    expected_actsig, disp_name, act
+                assert isinstance(expected_actsig, Sig)
+                expected_actsig.ensure_actor_has_correct_signature(
+                    disp_name, act, mcls._format_signature_with_types
                 )
             except _ActorDefinitionError as e:
                 try:
@@ -475,68 +694,68 @@ class _SpecMeta(type):
             return cls_name
         return f"Test{cls_name}"
     
-    @classmethod
-    def _ensure_act_has_correct_signature(
-        mcls, form: dict[str, type], disp_name: str, act: Callable
-    ) -> None:
-        error_prefix = f"Invalid actor definition for '{disp_name}': "
-        sig = inspect.signature(act)
-        hints = get_type_hints(act)
-        params = list(sig.parameters.values())[1:]  # skip 'self'
+    # @classmethod
+    # def _ensure_act_has_correct_signature(
+    #     mcls, form: dict[str, type], disp_name: str, act: Callable
+    # ) -> None:
+    #     error_prefix = f"Invalid actor definition for '{disp_name}': "
+    #     sig = inspect.signature(act)
+    #     hints = get_type_hints(act)
+    #     params = list(sig.parameters.values())[1:]  # skip 'self'
 
-        # signatures string for error messages
-        actual_sig = mcls._format_signature_with_types(act)
-        expected_sig = (
-            "fn(self, " + ", ".join(
-                f"{name}: {tp.__name__}" for name, tp in form.items()
-            ) + ")"
-        )
-        if expected_sig == "fn(self, )":
-            expected_sig = "fn(self)"
+    #     # signatures string for error messages
+    #     actual_sig = mcls._format_signature_with_types(act)
+    #     expected_sig = (
+    #         "fn(self, " + ", ".join(
+    #             f"{name}: {tp.__name__}" for name, tp in form.items()
+    #         ) + ")"
+    #     )
+    #     if expected_sig == "fn(self, )":
+    #         expected_sig = "fn(self)"
 
-        for index, (expected_name, expected_type) in enumerate(form.items()):
-            if index >= len(params):
-                raise _ActorDefinitionError(
-                    error_prefix +
-                    f"It has fewer parameters " +
-                    f"than expected (missing index {index}).\n" +
-                    f"Expected signature: {expected_sig}\n" +
-                    f"Actual signature: {actual_sig}"
-                )
+    #     for index, (expected_name, expected_type) in enumerate(form.items()):
+    #         if index >= len(params):
+    #             raise _ActorDefinitionError(
+    #                 error_prefix +
+    #                 f"It has fewer parameters " +
+    #                 f"than expected (missing index {index}).\n" +
+    #                 f"Expected signature: {expected_sig}\n" +
+    #                 f"Actual signature: {actual_sig}"
+    #             )
 
-            param = params[index]
+    #         param = params[index]
 
-            # name check
-            if param.name != expected_name:
-                raise _ActorDefinitionError(
-                    error_prefix +
-                    f"Parameter name mismatch: " +
-                    f"expected '{expected_name}', but received '{param.name}'.\n" +
-                    f"Expected signature: {expected_sig}\n" +
-                    f"Actual signature: {actual_sig}"
-                )
+    #         # name check
+    #         if param.name != expected_name:
+    #             raise _ActorDefinitionError(
+    #                 error_prefix +
+    #                 f"Parameter name mismatch: " +
+    #                 f"expected '{expected_name}', but received '{param.name}'.\n" +
+    #                 f"Expected signature: {expected_sig}\n" +
+    #                 f"Actual signature: {actual_sig}"
+    #             )
 
-            # type check (only if act annotates it)
-            actual_type = hints.get(param.name)
-            if actual_type is not None and actual_type != expected_type:
-                raise _ActorDefinitionError(
-                    error_prefix +
-                    f"Type mismatch at parameter '{param.name}': " +
-                    f"expected '{expected_type.__name__}', " +
-                    f"but received '{actual_type.__name__}'.\n" +
-                    f"Expected signature: {expected_sig}\n" +
-                    f"Actual signature: {actual_sig}"
-                )
+    #         # type check (only if act annotates it)
+    #         actual_type = hints.get(param.name)
+    #         if actual_type is not None and actual_type != expected_type:
+    #             raise _ActorDefinitionError(
+    #                 error_prefix +
+    #                 f"Type mismatch at parameter '{param.name}': " +
+    #                 f"expected '{expected_type.__name__}', " +
+    #                 f"but received '{actual_type.__name__}'.\n" +
+    #                 f"Expected signature: {expected_sig}\n" +
+    #                 f"Actual signature: {actual_sig}"
+    #             )
         
-        if len(params) > len(form):
-            extra_params = [p.name for p in params[len(form):]]
-            raise _ActorDefinitionError(
-                error_prefix +
-                f"It has unexpected extra parameter(s): " +
-                f"{', '.join(extra_params)}.\n"
-                f"Expected signature: {expected_sig}\n" + 
-                f"Actual signature: {actual_sig}"
-            )
+    #     if len(params) > len(form):
+    #         extra_params = [p.name for p in params[len(form):]]
+    #         raise _ActorDefinitionError(
+    #             error_prefix +
+    #             f"It has unexpected extra parameter(s): " +
+    #             f"{', '.join(extra_params)}.\n"
+    #             f"Expected signature: {expected_sig}\n" + 
+    #             f"Actual signature: {actual_sig}"
+    #         )
 
     @classmethod
     def _format_signature_with_types(mcls, func: Callable) -> str:
@@ -585,17 +804,20 @@ class _SpecMeta(type):
         else:
             # For dispatcher defined on top-level.
             bound_disp_getter = lambda: dispatcher
+        act_param_name = getattr(dispatcher, _ACT_PARAM_NAME)
         generated_test = None
         if is_d_async:
             async def ex_test_async(self, *args, **kwargs):
                 bound_act = getattr(self, act_name)
-                await bound_disp_getter()(bound_act, *args, **kwargs)
+                kwargs[act_param_name] = bound_act
+                await bound_disp_getter()(*args, **kwargs)
             generated_test = ex_test_async
         else:
             # def ex_test(self, *args, **kwargs):
             def ex_test(self, *args, **kwargs):
                 bound_act = getattr(self, act_name)
-                bound_disp_getter()(bound_act, *args, **kwargs)
+                kwargs[act_param_name] = bound_act
+                bound_disp_getter()(*args, **kwargs)
             generated_test = ex_test
 
         return generated_test
@@ -607,25 +829,35 @@ class _SpecMeta(type):
         
         kind = getattr(dispatcher, _TARGET_KIND)
         disp_sig = inspect.signature(dispatcher)
-        test_params = list(disp_sig.parameters.values())
+        test_params = [
+            p for p in disp_sig.parameters.values()
+            if not isinstance(p.default, Sig)
+        ]
+        #test_params = list(disp_sig.parameters.values())
 
-        # Strict positional rule, name is arbitrary
-        len_required = 2 if kind is TargetKind.EX_SPEC_DISPATCHER_IN_CLASS else 1
-        if len(test_params) < len_required:
-            raise TypeError(
-                f"Dispatcher '{dispatcher.__qualname__}' must define an argument " +
-                "in the 'act' position."
-            )
+
+        # # Strict positional rule, name is arbitrary
+        # len_required = 1 if kind is TargetKind.EX_SPEC_DISPATCHER_IN_CLASS else 0
+        # if len(test_params) < len_required:
+        #     raise TypeError(
+        #         f"Dispatcher '{dispatcher.__qualname__}' must define an argument " +
+        #         "in the 'act' position."
+        #     )
         
+        # if kind is TargetKind.EX_SPEC_DISPATCHER:
+        #     test_params = test_params[1:] # remove first param ('act')
+        #     test_params.insert(
+        #         0, inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        #     ) 
+        # elif kind is TargetKind.EX_SPEC_DISPATCHER_IN_CLASS:
+        #     test_params.pop(1) # remove second param ('act'), keep 'self'
+        # else:
+        #     raise RuntimeError(f"Unexpected kind found '{kind}'.")
         if kind is TargetKind.EX_SPEC_DISPATCHER:
-            test_params = test_params[1:] # remove first param ('act')
+            # Add 'self' as first parameter
             test_params.insert(
                 0, inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD)
-            ) 
-        elif kind is TargetKind.EX_SPEC_DISPATCHER_IN_CLASS:
-            test_params.pop(1) # remove second param ('act'), keep 'self'
-        else:
-            raise RuntimeError(f"Unexpected kind found '{kind}'.")
+            )
         
         target.__signature__ = inspect.Signature(parameters = test_params)
         return target
@@ -696,6 +928,12 @@ class Spec(metaclass = _SpecMeta):
     call signatures or invocation behavior of generated tests.
     """
     __slots__ = ()
+
+    @classmethod
+    def get_decorators(
+        cls, as_pytestmark: bool = False, passes: tuple = (), blocks: tuple = ()
+    ) -> tuple[_Case, _Ex]:
+        return _Case(as_pytestmark, passes, blocks), _Ex(as_pytestmark, passes, blocks)
 
     async def dispatch_async(self, name: str, actor: Callable, *args, **kwargs):
         await actor(*args, **kwargs)
