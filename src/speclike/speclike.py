@@ -380,7 +380,7 @@ class _DecoratorCreator(Generic[_P], ABC):
     def _create_picker_operation(self) -> _P:
         ...
 
-class _ScenarioLabel(Generic[_P]):
+class ScenarioLabel(Generic[_P]):
 
     LABEL = "scenario"
     PREFIX = LABEL + "_"
@@ -490,7 +490,7 @@ class _ScenarioLabel(Generic[_P]):
         return self._deco_creator._d(self.PREFIX + "IMPORTANT")
 
 
-class _LabelMixIn(Generic[_P]):
+class Label(Generic[_P]):
     """Mixin for creating decorators tied to a specific label."""
 
     _d: Callable[[Any], _Decorator[_P]]
@@ -499,8 +499,8 @@ class _LabelMixIn(Generic[_P]):
     __slots__ = ()
 
     @property
-    def scenario(self) -> _ScenarioLabel:
-        return _ScenarioLabel(self._get_instance())
+    def scenario(self) -> ScenarioLabel:
+        return ScenarioLabel(self._get_instance())
 
     @property
     def api(self) -> _Decorator[_P]:
@@ -586,8 +586,8 @@ class _LabelMixIn(Generic[_P]):
     def IMPORTANT(self) -> _Decorator[_P]:
         return self._d("IMPORTANT")
 
-class _Case(
-    _LabelMixIn[_TestBodyAndActorPicker],
+class Case(
+    Label[_TestBodyAndActorPicker],
     _DecoratorCreator[_TestBodyAndActorPicker]
 ):
     def _create_picker_operation(self) -> _TestBodyAndActorPicker:
@@ -597,8 +597,8 @@ class _Case(
         deco = self._d(None)
         return deco._get_picker()._get_ex_actor_decorator(deco, ex_dispatcher)
 
-class _Ex(
-    _LabelMixIn[_DispatcherPicker],
+class Ex(
+    Label[_DispatcherPicker],
     _DecoratorCreator[_DispatcherPicker]
 ):
     def _create_picker_operation(self) -> _DispatcherPicker:
@@ -904,8 +904,8 @@ class Spec(metaclass = _SpecMeta):
     @classmethod
     def get_decorators(
         cls, as_pytestmark: bool = False, passes: tuple = (), blocks: tuple = ()
-    ) -> tuple[_Case, _Ex]:
-        return _Case(as_pytestmark, passes, blocks), _Ex(as_pytestmark, passes, blocks)
+    ) -> tuple[Case, Ex]:
+        return Case(as_pytestmark, passes, blocks), Ex(as_pytestmark, passes, blocks)
 
     async def dispatch_async(self, name: str, actor: Callable, *args, **kwargs):
         await actor(*args, **kwargs)
