@@ -373,20 +373,142 @@ class _DecoratorCreator(Generic[_P], ABC):
         picker_operation = self._create_picker_operation()
         return _Decorator[_P](picker_operation, label_object, passes)
     
+    def _get_instance(self) -> _DecoratorCreator[_P]:
+        return self
+    
     @abstractmethod
     def _create_picker_operation(self) -> _P:
         ...
+
+class _ScenarioLabel(Generic[_P]):
+
+    LABEL = "scenario"
+    PREFIX = LABEL + "_"
     
+    def __init__(self, deco_creator: _DecoratorCreator[_P]):
+        self._deco_creator = deco_creator
+
+    def __call__(self, target: T) -> T:
+        return self._deco_creator._d(self.LABEL).__call__(target)
+
+    def follows(self, *argvalues, **options) -> _Decorator:
+        return self._deco_creator._d(self.LABEL).follows(*argvalues, **options)
+    
+    @property
+    def skip(self) -> _Decorator:
+        return self._deco_creator._d(self.LABEL).skip
+    
+    @property
+    def SKIP(self) -> _Decorator:
+        return self._deco_creator.skip
+
+    def ptm(self, *pytestmark) -> _Decorator:
+        return self._deco_creator._d(self.LABEL).ptm(*pytestmark)
+
+    @property
+    def api(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "api")
+    
+    @property
+    def usecase(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "usecase")
+
+    @property
+    def feature(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "feature")
+    
+    @property
+    def default(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "default")
+    
+    @property
+    def init(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "init")
+    
+    @property
+    def init_fail(self) ->_Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "init_fail")
+    
+    @property
+    def cleanup(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "cleanup")
+    
+    @property
+    def cleanup_fail(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "cleanup_fail")
+    
+    @property
+    def edge(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "edge")
+
+    @property
+    def edge_pass(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "edge_pass")
+    
+    @property
+    def edge_fail(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "edge_fail")
+    
+    @property
+    def legacy(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "legacy")
+    
+    @property
+    def legacy_fail(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "legacy_fail")
+    
+    @property
+    def violation(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "violation")
+    
+    @property
+    def raises(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "raises")
+    
+    @property
+    def recovers(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "recovers")
+    
+    @property
+    def error(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "error")
+    
+    @property
+    def critical(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "critical")
+    
+    @property
+    def silent(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "silent")
+    
+    @property
+    def NOTE(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "NOTE")
+    
+    @property
+    def IMPORTANT(self) -> _Decorator[_P]:
+        return self._deco_creator._d(self.PREFIX + "IMPORTANT")
+
 
 class _LabelMixIn(Generic[_P]):
     """Mixin for creating decorators tied to a specific label."""
+
     _d: Callable[[Any], _Decorator[_P]]
-    
+    _get_instance: Callable[[], _DecoratorCreator[_P]]
+
     __slots__ = ()
+
+    @property
+    def scenario(self) -> _ScenarioLabel:
+        return _ScenarioLabel(self._get_instance())
 
     @property
     def api(self) -> _Decorator[_P]:
         return self._d("api")
+    
+    @property
+    def usecase(self) -> _Decorator[_P]:
+        return self._d("usecase")
 
     @property
     def feature(self) -> _Decorator[_P]:
