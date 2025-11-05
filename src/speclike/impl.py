@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from enum import Enum, auto
 import sys
-from types import GenericAlias
-from typing import Any, Callable, Generic, Protocol, Self, TypeVar, get_type_hints
+from types import GenericAlias, MappingProxyType
+from typing import Any, Callable, Generic, Protocol, Self, Type, TypeVar, Union, cast, get_type_hints
 
 import inspect
 
@@ -13,7 +14,7 @@ import pytest
 
 MOD_NAME = "speclike"
 
-T = TypeVar("T", bound = Callable)
+_CA = TypeVar("_CA", bound = Callable)
 
 _TARGET_KIND = f"_{MOD_NAME}_target_kind"
 _PARAMS_UNIT = f"_{MOD_NAME}_params_unit"
@@ -34,7 +35,7 @@ class TargetKind(Enum):
 
 
 class _TailDecorator(Protocol):
-    def __call__(self, target: T) -> T:
+    def __call__(self, target: _CA) -> _CA:
         ...
 
 class _ExActorDecorator(_TailDecorator, Protocol):
@@ -43,7 +44,7 @@ class _ExActorDecorator(_TailDecorator, Protocol):
 
 class _AbstractPicker(ABC):
     @abstractmethod
-    def _process_target(self, target: T) -> T | None:
+    def _process_target(self, target: _CA) -> _CA | None:
         ...
 
 class _TestBodyAndActorPicker(_AbstractPicker):
@@ -51,7 +52,7 @@ class _TestBodyAndActorPicker(_AbstractPicker):
     def __init__(self):
         self._ref_dispatcher = None
 
-    def _process_target(self, target: T) -> T | None:
+    def _process_target(self, target: _CA) -> _CA | None:
         if target.__name__ == "_":
             # If the name is "_", treat it as an actor and set reference to dispatcher.
             if self._ref_dispatcher is None:
@@ -86,15 +87,91 @@ class _TestBodyAndActorPicker(_AbstractPicker):
             )
         self._ref_dispatcher = ex_dispatcher
 
-        def ex_actor_decorator(target: T) -> T:
+        def ex_actor_decorator(target: _CA) -> _CA:
             return deco.__call__(target)
         
         return ex_actor_decorator
 
+class PRM:
+    """
+    Parameter Prefix Rules
+    
+    The prefix determines the nature of each parameter:
+    
+    - AO (Actor-Only, prefix '_'):  
+      Provided by dispatcher, passed to actor.  
+      Not parametrized.  
+      Example: `_obj=Message` - dispatcher creates obj, actor uses it  
+    
+    - AP (Actor-Parametrized, no prefix):  
+      Parametrized value, passed to actor.  
+      Example: `value=int` - test runs with different values  
+    
+    - PO (Parametrized-Only, prefix '__'):  
+      Parametrized value, NOT passed to actor.  
+      Example: `__expected=int` - dispatcher uses for assertion  
+    
+    Parameters must be ordered: AO -> AP -> PO  
+    (any category can be omitted)  
+    
+    Usage:
+        @ex.follows((1, 10), (2, 20))  
+        def check(act=Sig(_ctx=Context, input=int, __expected=int)):  
+            ctx = Context()  
+            result = act(_ctx=ctx, input=input)  
+            assert result == __expected  
+    """
 
-class Sig:
-    __slots__ = ("_parameter_defs",)
+    NON_PARAMETRIZE = "_"
+    NON_ACTOR = "__"
+
+    class ParamKind(Enum):
+        AO = 0
+        AP = 1
+        PO = 2
+
+        @classmethod
+        def get(cls, param_name: str) -> "PRM.ParamKind":
+            if param_name.startswith(PRM.NON_ACTOR):
+                return cls.PO
+            elif param_name.startswith(PRM.NON_PARAMETRIZE):
+                return cls.AO
+            else:
+                return cls.AP
+        
+        @classmethod
+        def ensure_order(
+            cls, f: "PRM.ParamKind", t: "PRM.ParamKind"
+        ):
+            if f == cls.AP and t == cls.AO:
+                pass
+            elif f == cls.PO and (
+                t == cls.AO or t == cls.AP
+            ):
+                pass
+            else:
+                return
+            raise TypeError(
+                "Parameter order is invalid. "
+                f"It can not be specified '{t.name}' after '{f.name}'. "
+                f"See {PRM.__name__} docustring."
+            )
+            
+
+
+    __slots__ = ("_parameter_defs", "_act_param_defs", "_parametrize_names")
+
+    # def __new__(cls, *args, **kwargs) -> _ParamsBridge | _ParamsDefinition:
+    #     """Inform static type checkers that the arguments actually passed
+    #     are of type `_ParamsBridge`"""
+    #     return super().__new__(cls)
+
     def __init__(self, **parameter_defs):
+        act_param_defs = {}
+        parametrize_names = []
+
+        Kind = PRM.ParamKind
+        prev_kind = PRM.ParamKind.AO
         for k, v in parameter_defs.items():
             if not (isinstance(k, str) and k.isidentifier()):
                 raise TypeError(
@@ -107,11 +184,82 @@ class Sig:
                     f"expected a type or generic type alias (e.g. list[int]), " + 
                     f"but received '{type(v).__name__}'."
                 )
+            
+            current_kind = Kind.get(k)
+            Kind.ensure_order(prev_kind, current_kind)
+            _ensure_valid_param_names_as_param_bridge(k)
+            
+            if current_kind == Kind.AO or current_kind == Kind.AP:
+                act_param_defs[k] = v
+            
+            if current_kind == Kind.PO or current_kind == Kind.AP:
+                parametrize_names.append(k)
+            
         self._parameter_defs = parameter_defs
-    
-    def __call__(self, *args, **kwargs):
-        """The specific signature of the act function is not provided."""
-        pass
+        self._act_param_defs = act_param_defs
+        self._parametrize_names = parametrize_names
+
+    # def ensure_actor_has_correct_signature(
+    #     self, disp_name: str, act: Callable, actsig_formatter: Callable
+    # ) -> None:
+    #     error_prefix = f"Invalid actor definition for '{disp_name}': "
+    #     sig = inspect.signature(act)
+    #     hints = get_type_hints(act)
+    #     params = list(sig.parameters.values())[1:]  # skip 'self'
+
+    #     # signatures string for error messages
+    #     actual_sig = actsig_formatter(act)
+    #     expected_sig = (
+    #         "fn(self, " + ", ".join(
+    #             f"{name}: {tp.__name__}" for name, tp in self._parameter_defs.items()
+    #         ) + ")"
+    #     )
+    #     if expected_sig == "fn(self, )":
+    #         expected_sig = "fn(self)"
+
+    #     for i, (exp_name, exp_type) in enumerate(self._parameter_defs.items()):
+    #         if i >= len(params):
+    #             raise _ActorDefinitionError(
+    #                 error_prefix +
+    #                 f"It has fewer parameters " +
+    #                 f"than expected (missing index {i}).\n" +
+    #                 f"Expected signature: {expected_sig}\n" +
+    #                 f"Actual signature: {actual_sig}"
+    #             )
+
+    #         param = params[i]
+
+    #         # name check
+    #         if param.name != exp_name:
+    #             raise _ActorDefinitionError(
+    #                 error_prefix +
+    #                 f"Parameter name mismatch: " +
+    #                 f"expected '{exp_name}', but received '{param.name}'.\n" +
+    #                 f"Expected signature: {expected_sig}\n" +
+    #                 f"Actual signature: {actual_sig}"
+    #             )
+
+    #         # type check (only if act annotates it)
+    #         actual_type = hints.get(param.name)
+    #         if actual_type is not None and actual_type != exp_type:
+    #             raise _ActorDefinitionError(
+    #                 error_prefix +
+    #                 f"Type mismatch at parameter '{param.name}': " +
+    #                 f"expected '{exp_type.__name__}', " +
+    #                 f"but received '{actual_type.__name__}'.\n" +
+    #                 f"Expected signature: {expected_sig}\n" +
+    #                 f"Actual signature: {actual_sig}"
+    #             )
+        
+    #     if len(params) > len(self._parameter_defs):
+    #         extra_params = [p.name for p in params[len(self._parameter_defs):]]
+    #         raise _ActorDefinitionError(
+    #             error_prefix +
+    #             f"It has unexpected extra parameter(s): " +
+    #             f"{', '.join(extra_params)}.\n"
+    #             f"Expected signature: {expected_sig}\n" + 
+    #             f"Actual signature: {actual_sig}"
+    #         )
 
     def ensure_actor_has_correct_signature(
         self, disp_name: str, act: Callable, actsig_formatter: Callable
@@ -125,13 +273,13 @@ class Sig:
         actual_sig = actsig_formatter(act)
         expected_sig = (
             "fn(self, " + ", ".join(
-                f"{name}: {tp.__name__}" for name, tp in self._parameter_defs.items()
+                f"{n}: {t.__name__}" for n, t in self._act_param_defs.items()
             ) + ")"
         )
         if expected_sig == "fn(self, )":
             expected_sig = "fn(self)"
 
-        for i, (exp_name, exp_type) in enumerate(self._parameter_defs.items()):
+        for i, (exp_name, exp_type) in enumerate(self._act_param_defs.items()):
             if i >= len(params):
                 raise _ActorDefinitionError(
                     error_prefix +
@@ -174,19 +322,127 @@ class Sig:
                 f"Expected signature: {expected_sig}\n" + 
                 f"Actual signature: {actual_sig}"
             )
+    
+    def get_test_signature(self, owner: str | None = None):
+        """Specify owner when the signature for method. 'self' or "cls'."""
+        Parameter = inspect.Parameter
+        params = []
+        if owner is not None:
+            params.append(Parameter(owner, Parameter.POSITIONAL_OR_KEYWORD))
+        for pname in self._parametrize_names:
+            params.append(Parameter(pname, Parameter.POSITIONAL_OR_KEYWORD))
+        return inspect.Signature(params)
+    
+    def get_bridge(self, act: Callable, params: dict[str, Any]):
+        return _ParamsBridge(act, MappingProxyType(params))
+
+    # ============================================================
+    # These methods mimic the interface of _ParamsBridge that is
+    # actually passed to the dispatcher. They exist solely to
+    # propagate static type information and are never called at
+    # runtime.
+    # ============================================================
+    @property
+    def act(self, *args, **kwargs) -> Callable:
+        raise RuntimeError("Unexpected call.")
+
+    def type(self, t: type[_T]) -> _TypedGetter[_T]:
+        raise RuntimeError("Unexpected call.")
+
+    def __getattr__(self, key) -> Any:
+        raise RuntimeError("Unexpected call.")
+    # ============================================================
+    # ============================================================
+
+_T = TypeVar("_T")
+
+class _TypedGetter(Generic[_T]):
+    __slots__ = ("_src", "_type")
+    def __init__(self, src:_ParamsBridge, t: Type[_T]):
+        if not isinstance(t, type):
+            raise TypeError(
+                "t must be a type instance, "
+                f"but received '{type(t).__name__}'."
+            )
+        self._src = src
+        self._type = t
+    
+    def __getattr__(self, key) -> _T:
+        src = object.__getattribute__(self, "_src")
+        typ = object.__getattribute__(self, "_type")
+        attr = getattr(src, key)
+        if not isinstance(attr, typ):
+            raise TypeError(
+                "Parameter type missmatch, "
+                f"expected type '{typ.__name__}', "
+                f"but actual type '{type(attr).__name__}'."
+            )
+        return cast(_T, attr)
+
+_RESERVED_PARAM_NAMES = (
+    "act",
+    "type",
+    "_ParamsBridge_act",
+    "_ParamsBridge_params",
+)
+
+def _ensure_valid_param_names_as_param_bridge(pname: str):
+    """Define it outside the _ParamsBridge class to avoid attribute definition."""
+
+    if pname in _RESERVED_PARAM_NAMES:
+        raise TypeError(
+            f"Invalid parameter name '{pname}'. "
+            f"'{_RESERVED_PARAM_NAMES}' are reserved and cannot be used."
+        )
+
+@dataclass(slots = True, frozen = True)
+class _ParamsBridge:
+
+    _ParamsBridge_act: Callable
+    _ParamsBridge_params: MappingProxyType[str, Any]
+
+    @property
+    def act(self):
+        return self._ParamsBridge_act
+
+    def __getattr__(self, key):
+        params = object.__getattribute__(self, "_ParamsBridge_params")
+        if key in params:
+            return params[key]
+        
+        available = ", ".join(params.keys())
+        raise AttributeError(
+            f"'{type(self).__name__}' has no attribute '{key}'. "
+            f"Available: {available}"
+        )
+    
+    def type(self, t: type[_T]) -> _TypedGetter[_T]:
+        return _TypedGetter(self, t)
+
+    def __repr__(self) -> str:
+        params = object.__getattribute__(self, "_ParamsBridge_params")
+        items = ", ".join(f"{k}={v!r}" for k, v in params.items())
+        return f"{type(self).__name__}({items})"
+
 
 
 class _DispatcherPicker(_AbstractPicker):
-    def _process_target(self, target: T) -> T | None:
+    def _process_target(self, target: _CA) -> _CA | None:
         if target.__name__ == _ACTOR_FUNCTION_NAME:
             raise NameError(
                 "Dispatcher picker can not handle actor function."
                 f"Function name '{_ACTOR_FUNCTION_NAME}' represents actor function."
-            )        
+            )
         sig = inspect.signature(target)
+        if len(sig.parameters) > 2:
+            raise TypeError(
+                "Dispatcher function can only have 'owner' and/or one parameters"
+                f"(Which must have '{PRM.__name__}' as its default), "
+                f"but received a dispatcher with 'fn{sig}'."
+            )
         found_sig = False
         for k, v in sig.parameters.items():
-            if isinstance(v.default, Sig):
+            if isinstance(v.default, PRM):
                 if found_sig:
                     raise TypeError(
                         f"Multiple Sig found. Last one is on '{k}'."
@@ -197,7 +453,7 @@ class _DispatcherPicker(_AbstractPicker):
         if not found_sig:
             raise TypeError(
                 "Parameter definition for act function is not found. "
-                f"Dispatcher function must have {Sig.__name__} object as a default "
+                f"Dispatcher function must have {PRM.__name__} object as a default "
                 "on one of its parameters."
             )
         
@@ -224,11 +480,11 @@ class _Decorator(Generic[_P]):
         self._op = op
         self._label = label
         self._label_as_pytestmark = label_as_pytestmark
-        self._params = None
+        self._parametrize_unit = None
         self._ptms = []
         self._returns_target_already = False
 
-    def __call__(self, target: T) -> T:
+    def __call__(self, target: _CA) -> _CA:
         if self._returns_target_already:
             raise RuntimeError(
                 f"Attempted to process {target.__qualname__}, "
@@ -247,15 +503,15 @@ class _Decorator(Generic[_P]):
                 target.pytestmark.append(getattr(pytest.mark, self._label))
             else:
                 target.pytestmark.append(self._label)
-        if self._params:
-            setattr(target, _PARAMS_UNIT, self._params)
+        if self._parametrize_unit:
+            setattr(target, _PARAMS_UNIT, self._parametrize_unit)
         target.pytestmark.extend(self._ptms)
 
         self._returns_target_already = True
         return target
 
     def follows(self, *argvalues, **options) -> Self:
-        self._params = argvalues, options
+        self._parametrize_unit = argvalues, options
         return self
     
     @property
@@ -348,7 +604,7 @@ class _DecoratorCreator(Generic[_P], ABC):
         self._passes = passes
         self._blocks = blocks
     
-    def __call__(self, target: T) -> T:
+    def __call__(self, target: _CA) -> _CA:
         return self._d(None)(target)
     
     def follows(self, *argvalues, **options) -> _Decorator:
@@ -388,7 +644,7 @@ class ScenarioLabel(Generic[_P]):
     def __init__(self, deco_creator: _DecoratorCreator[_P]):
         self._deco_creator = deco_creator
 
-    def __call__(self, target: T) -> T:
+    def __call__(self, target: _CA) -> _CA:
         return self._deco_creator._d(self.LABEL).__call__(target)
 
     def follows(self, *argvalues, **options) -> _Decorator:
@@ -672,15 +928,15 @@ class _SpecMeta(type):
         
         for act in namespace.get_actors():
             dispatcher = getattr(act, _REF_DISPATCHER)
-            expected_actsig = getattr(dispatcher, _ACT_SIGNATURE)
+            ex_param_def = getattr(dispatcher, _ACT_SIGNATURE)
+            assert isinstance(ex_param_def, PRM)
             disp_name = mcls._get_dispatcher_name(dispatcher)
             act_name = mcls._get_act_name(disp_name)
             test_name = mcls._get_test_name(disp_name)
 
             try:
-                # passes dipatcher name for structing error message. 
-                assert isinstance(expected_actsig, Sig)
-                expected_actsig.ensure_actor_has_correct_signature(
+                # passes dipatcher name for structing error message.
+                ex_param_def.ensure_actor_has_correct_signature(
                     disp_name, act, mcls._format_signature_with_types
                 )
             except _ActorDefinitionError as e:
@@ -696,10 +952,13 @@ class _SpecMeta(type):
             # from the owner instance.
             act_bridge = mcls._create_act_bridge(act)
             generated_funcs[act_name] = act_bridge
-            test = mcls._create_ex_test(disp_name, act_name, dispatcher, act)
+            test = mcls._create_ex_test(
+                disp_name, act_name, dispatcher, act, ex_param_def
+            )
             #Passing through this method (below) normalizes 
             # the function signature to fn(self, p1, p2, ...).
-            test = mcls._set_signature_for_ex_test(dispatcher, test)
+            #test = mcls._set_signature_for_ex_test(dispatcher, test)
+            test.__signature__ = ex_param_def.get_test_signature("self")
             test = mcls._init_and_copy_pytestmark_attr(dispatcher, test)
             test = mcls._synth_and_set_parametrize_mark(dispatcher, test)
             test = mcls._copy_defined_lineno(act, test)
@@ -783,7 +1042,12 @@ class _SpecMeta(type):
 
     @classmethod
     def _create_ex_test(
-            mcls, disp_name: str, act_name: str, dispatcher: Callable, act: Callable
+            mcls,
+            disp_name: str,
+            act_name: str,
+            dispatcher: Callable,
+            act: Callable,
+            ex_param_def: PRM
     ) -> Callable:
         is_d_async = inspect.iscoroutinefunction(dispatcher)
         is_a_async = inspect.iscoroutinefunction(act)
@@ -798,41 +1062,43 @@ class _SpecMeta(type):
         act_param_name = getattr(dispatcher, _ACT_PARAM_NAME)
         generated_test = None
         if is_d_async:
-            async def ex_test_async(self, *args, **kwargs):
+            async def ex_test_async(self, **kwargs):
                 bound_act = getattr(self, act_name)
-                kwargs[act_param_name] = bound_act
-                await bound_disp_getter()(*args, **kwargs)
+                # kwargs[act_param_name] = bound_act
+                params_bridge = ex_param_def.get_bridge(bound_act, kwargs)
+                await bound_disp_getter()(params_bridge)
             generated_test = ex_test_async
         else:
             # def ex_test(self, *args, **kwargs):
-            def ex_test(self, *args, **kwargs):
+            def ex_test(self, **kwargs):
                 bound_act = getattr(self, act_name)
-                kwargs[act_param_name] = bound_act
-                bound_disp_getter()(*args, **kwargs)
+                #kwargs[act_param_name] = bound_act
+                params_bridge = ex_param_def.get_bridge(bound_act, kwargs)
+                bound_disp_getter()(params_bridge)
             generated_test = ex_test
 
         return generated_test
     
-    @classmethod
-    def _set_signature_for_ex_test(
-        mcls, dispatcher: Callable, target: Callable
-    ) -> Callable:
+    # @classmethod
+    # def _set_signature_for_ex_test(
+    #     mcls, dispatcher: Callable, target: Callable
+    # ) -> Callable:
         
-        kind = getattr(dispatcher, _TARGET_KIND)
-        disp_sig = inspect.signature(dispatcher)
-        test_params = [
-            p for p in disp_sig.parameters.values()
-            if not isinstance(p.default, Sig)
-        ]
+    #     kind = getattr(dispatcher, _TARGET_KIND)
+    #     disp_sig = inspect.signature(dispatcher)
+    #     test_params = [
+    #         p for p in disp_sig.parameters.values()
+    #         if not isinstance(p.default, Sig)
+    #     ]
 
-        if kind is TargetKind.EX_SPEC_DISPATCHER:
-            # Add 'self' as first parameter
-            test_params.insert(
-                0, inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD)
-            )
+    #     if kind is TargetKind.EX_SPEC_DISPATCHER:
+    #         # Add 'self' as first parameter
+    #         test_params.insert(
+    #             0, inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    #         )
         
-        target.__signature__ = inspect.Signature(parameters = test_params)
-        return target
+    #     target.__signature__ = inspect.Signature(parameters = test_params)
+    #     return target
         
     
     @classmethod
