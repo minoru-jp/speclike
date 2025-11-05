@@ -108,9 +108,9 @@ Example:
 
 """
 
-from speclike.impl import Spec, ExSpec, Sig
+from speclike.impl import Spec, ExSpec, PRM
 
 __all__ = [
-    "Spec", "ExSpec", "Sig"
+    "Spec", "ExSpec", "PRM"
 ]
 

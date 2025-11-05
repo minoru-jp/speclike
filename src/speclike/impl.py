@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 import sys
 from types import GenericAlias, MappingProxyType
-from typing import Any, Callable, Generic, Protocol, Self, Type, TypeVar, Union, cast, get_type_hints
+from typing import Any, Callable, Generic, Protocol, Self, Type, TypeVar, cast, get_type_hints
 
 import inspect
 
@@ -161,11 +161,6 @@ class PRM:
 
     __slots__ = ("_parameter_defs", "_act_param_defs", "_parametrize_names")
 
-    # def __new__(cls, *args, **kwargs) -> _ParamsBridge | _ParamsDefinition:
-    #     """Inform static type checkers that the arguments actually passed
-    #     are of type `_ParamsBridge`"""
-    #     return super().__new__(cls)
-
     def __init__(self, **parameter_defs):
         act_param_defs = {}
         parametrize_names = []
@@ -198,68 +193,6 @@ class PRM:
         self._parameter_defs = parameter_defs
         self._act_param_defs = act_param_defs
         self._parametrize_names = parametrize_names
-
-    # def ensure_actor_has_correct_signature(
-    #     self, disp_name: str, act: Callable, actsig_formatter: Callable
-    # ) -> None:
-    #     error_prefix = f"Invalid actor definition for '{disp_name}': "
-    #     sig = inspect.signature(act)
-    #     hints = get_type_hints(act)
-    #     params = list(sig.parameters.values())[1:]  # skip 'self'
-
-    #     # signatures string for error messages
-    #     actual_sig = actsig_formatter(act)
-    #     expected_sig = (
-    #         "fn(self, " + ", ".join(
-    #             f"{name}: {tp.__name__}" for name, tp in self._parameter_defs.items()
-    #         ) + ")"
-    #     )
-    #     if expected_sig == "fn(self, )":
-    #         expected_sig = "fn(self)"
-
-    #     for i, (exp_name, exp_type) in enumerate(self._parameter_defs.items()):
-    #         if i >= len(params):
-    #             raise _ActorDefinitionError(
-    #                 error_prefix +
-    #                 f"It has fewer parameters " +
-    #                 f"than expected (missing index {i}).\n" +
-    #                 f"Expected signature: {expected_sig}\n" +
-    #                 f"Actual signature: {actual_sig}"
-    #             )
-
-    #         param = params[i]
-
-    #         # name check
-    #         if param.name != exp_name:
-    #             raise _ActorDefinitionError(
-    #                 error_prefix +
-    #                 f"Parameter name mismatch: " +
-    #                 f"expected '{exp_name}', but received '{param.name}'.\n" +
-    #                 f"Expected signature: {expected_sig}\n" +
-    #                 f"Actual signature: {actual_sig}"
-    #             )
-
-    #         # type check (only if act annotates it)
-    #         actual_type = hints.get(param.name)
-    #         if actual_type is not None and actual_type != exp_type:
-    #             raise _ActorDefinitionError(
-    #                 error_prefix +
-    #                 f"Type mismatch at parameter '{param.name}': " +
-    #                 f"expected '{exp_type.__name__}', " +
-    #                 f"but received '{actual_type.__name__}'.\n" +
-    #                 f"Expected signature: {expected_sig}\n" +
-    #                 f"Actual signature: {actual_sig}"
-    #             )
-        
-    #     if len(params) > len(self._parameter_defs):
-    #         extra_params = [p.name for p in params[len(self._parameter_defs):]]
-    #         raise _ActorDefinitionError(
-    #             error_prefix +
-    #             f"It has unexpected extra parameter(s): " +
-    #             f"{', '.join(extra_params)}.\n"
-    #             f"Expected signature: {expected_sig}\n" + 
-    #             f"Actual signature: {actual_sig}"
-    #         )
 
     def ensure_actor_has_correct_signature(
         self, disp_name: str, act: Callable, actsig_formatter: Callable
@@ -1078,28 +1011,6 @@ class _SpecMeta(type):
             generated_test = ex_test
 
         return generated_test
-    
-    # @classmethod
-    # def _set_signature_for_ex_test(
-    #     mcls, dispatcher: Callable, target: Callable
-    # ) -> Callable:
-        
-    #     kind = getattr(dispatcher, _TARGET_KIND)
-    #     disp_sig = inspect.signature(dispatcher)
-    #     test_params = [
-    #         p for p in disp_sig.parameters.values()
-    #         if not isinstance(p.default, Sig)
-    #     ]
-
-    #     if kind is TargetKind.EX_SPEC_DISPATCHER:
-    #         # Add 'self' as first parameter
-    #         test_params.insert(
-    #             0, inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD)
-    #         )
-        
-    #     target.__signature__ = inspect.Signature(parameters = test_params)
-    #     return target
-        
     
     @classmethod
     def _create_in_test(mcls, test_body: Callable):
