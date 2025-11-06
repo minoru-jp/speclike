@@ -22,7 +22,6 @@ _REF_DISPATCHER = f"_{MOD_NAME}_dispatcher"
 _NAME_ON_NS = f"_{MOD_NAME}_name_on_namespace"
 _OWNER = f"_{MOD_NAME}_owner"
 _ACT_SIGNATURE = f"_{MOD_NAME}_act_signature"
-_ACT_PARAM_NAME = f"_{MOD_NAME}_act_param_name"
 
 _ACTOR_FUNCTION_NAME = "_"
 
@@ -340,17 +339,6 @@ class _ParamsBridge:
     def act(self):
         return self._ParamsBridge_act
 
-    # def __getattr__(self, key):
-    #     params = object.__getattribute__(self, "_ParamsBridge_params")
-    #     if key in params:
-    #         return params[key]
-        
-    #     available = ", ".join(params.keys())
-    #     raise AttributeError(
-    #         f"'{type(self).__name__}' has no attribute '{key}'. "
-    #         f"Available: {available}"
-    #     )
-
     def __getattr__(self, key):
         params = object.__getattribute__(self, "_ParamsBridge_params")
 
@@ -403,12 +391,7 @@ class _DispatcherPicker(_AbstractPicker):
                 found_prm = True
                 #setattr(target, _ACT_PARAM_NAME, k)
                 setattr(target, _ACT_SIGNATURE, v.default)
-        # if not found_prm:
-        #     raise TypeError(
-        #         "Parameter definition for act function is not found. "
-        #         f"Dispatcher function must have {PRM.__name__} object as a default "
-        #         "on one of its parameters."
-        #     )
+
         if not found_prm:
             setattr(target, _ACT_SIGNATURE, PRM())
         setattr(target, _TARGET_KIND, TargetKind.EX_SPEC_DISPATCHER)
@@ -911,7 +894,6 @@ class _SpecMeta(type):
             )
             #Passing through this method (below) normalizes 
             # the function signature to fn(self, p1, p2, ...).
-            #test = mcls._set_signature_for_ex_test(dispatcher, test)
             test.__signature__ = ex_param_def.get_test_signature("self")
             test = mcls._init_and_copy_pytestmark_attr(dispatcher, test)
             test = mcls._synth_and_set_parametrize_mark(dispatcher, test)
@@ -1013,20 +995,16 @@ class _SpecMeta(type):
         else:
             # For dispatcher defined on top-level.
             bound_disp_getter = lambda: dispatcher
-        #act_param_name = getattr(dispatcher, _ACT_PARAM_NAME)
         generated_test = None
         if is_d_async:
             async def ex_test_async(self, **kwargs):
                 bound_act = getattr(self, act_name)
-                # kwargs[act_param_name] = bound_act
                 params_bridge = ex_param_def.get_bridge(bound_act, kwargs)
                 await bound_disp_getter()(params_bridge)
             generated_test = ex_test_async
         else:
-            # def ex_test(self, *args, **kwargs):
             def ex_test(self, **kwargs):
                 bound_act = getattr(self, act_name)
-                #kwargs[act_param_name] = bound_act
                 params_bridge = ex_param_def.get_bridge(bound_act, kwargs)
                 bound_disp_getter()(params_bridge)
             generated_test = ex_test
