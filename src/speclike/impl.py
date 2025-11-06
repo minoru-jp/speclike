@@ -22,8 +22,10 @@ _REF_DISPATCHER = f"_{MOD_NAME}_dispatcher"
 _NAME_ON_NS = f"_{MOD_NAME}_name_on_namespace"
 _OWNER = f"_{MOD_NAME}_owner"
 _ACT_SIGNATURE = f"_{MOD_NAME}_act_signature"
+_PARAM_EXPECTED_EXCTYPE = f"_{MOD_NAME}_expected_exctype"
 
 _ACTOR_FUNCTION_NAME = "_"
+
 
 class TargetKind(Enum):
     _UNDETERMINED = 0 # not used at current implementation.
@@ -43,7 +45,8 @@ class _ExActorDecorator(_TailDecorator, Protocol):
 
 class _AbstractPicker(ABC):
     @abstractmethod
-    def _process_target(self, target: _CA) -> _CA | None:
+    #def _process_target(self, target: _CA) -> _CA | None:
+    def _process_target(self, taraget: _CA, params: dict[str, Any]) -> _CA | None:
         ...
 
 class _TestBodyAndActorPicker(_AbstractPicker):
@@ -51,8 +54,9 @@ class _TestBodyAndActorPicker(_AbstractPicker):
     def __init__(self):
         self._ref_dispatcher = None
 
-    def _process_target(self, target: _CA) -> _CA | None:
-        if target.__name__ == "_":
+    def _process_target(self, target: _CA, params: dict[str, Any]) -> _CA | None:
+        # if target.__name__ == "_":
+        if target.__name__ == _ACTOR_FUNCTION_NAME:
             # If the name is "_", treat it as an actor and set reference to dispatcher.
             if self._ref_dispatcher is None:
                 raise RuntimeError(
@@ -67,6 +71,9 @@ class _TestBodyAndActorPicker(_AbstractPicker):
             setattr(target, _REF_DISPATCHER, self._ref_dispatcher)
             return target
         
+        if _PARAM_EXPECTED_EXCTYPE in params:
+            setattr(target, _PARAM_EXPECTED_EXCTYPE, params[_PARAM_EXPECTED_EXCTYPE])
+
         setattr(target, _TARGET_KIND, TargetKind.INDIVIDUAL_TEST_BODY)
         return None
 
@@ -267,6 +274,12 @@ class PRM:
             params.append(Parameter(pname, Parameter.POSITIONAL_OR_KEYWORD))
         return inspect.Signature(params)
     
+    def add_implicitly_params(self, src: Callable, params: dict[str, Any]) -> None:
+        if hasattr(src, _PARAM_EXPECTED_EXCTYPE):
+            key = f"{_IMPLICITLY_ADDED_PARAM_PREFIX}exctype"
+            value = getattr(src,_PARAM_EXPECTED_EXCTYPE)
+            params[key] = value
+    
     def get_bridge(self, act: Callable, params: dict[str, Any]):
         return _ParamsBridge(act, MappingProxyType(params))
 
@@ -320,14 +333,25 @@ _RESERVED_PARAM_NAMES = (
     "_ParamsBridge_params",
 )
 
+_IMPLICITLY_ADDED_PARAM_PREFIX = "__sl_"
+
 def _ensure_valid_param_names_as_param_bridge(pname: str):
     """Define it outside the _ParamsBridge class to avoid attribute definition."""
 
-    if pname in _RESERVED_PARAM_NAMES:
+    # if pname in _RESERVED_PARAM_NAMES:
+    if pname in _RESERVED_PARAM_NAMES or (
+        pname.startswith(_IMPLICITLY_ADDED_PARAM_PREFIX)
+    ):
+        # raise TypeError(
+        #     f"Invalid parameter name '{pname}'. "
+        #     f"'{_RESERVED_PARAM_NAMES}' are reserved and cannot be used."
+        # )
         raise TypeError(
-            f"Invalid parameter name '{pname}'. "
-            f"'{_RESERVED_PARAM_NAMES}' are reserved and cannot be used."
-        )
+        f"Invalid parameter name '{pname}'. "
+        f"The names {_RESERVED_PARAM_NAMES} are reserved and cannot be used, "
+        f"and any parameter name starting with the prefix "
+        f"'{_IMPLICITLY_ADDED_PARAM_PREFIX}' is also reserved."
+)
 
 @dataclass(slots = True, frozen = True)
 class _ParamsBridge:
@@ -367,7 +391,7 @@ class _ParamsBridge:
 
 
 class _DispatcherPicker(_AbstractPicker):
-    def _process_target(self, target: _CA) -> _CA | None:
+    def _process_target(self, target: _CA, params: dict[str, Any]) -> _CA | None:
         if target.__name__ == _ACTOR_FUNCTION_NAME:
             raise NameError(
                 "Dispatcher picker can not handle actor function."
@@ -395,6 +419,9 @@ class _DispatcherPicker(_AbstractPicker):
         if not found_prm:
             setattr(target, _ACT_SIGNATURE, PRM())
         setattr(target, _TARGET_KIND, TargetKind.EX_SPEC_DISPATCHER)
+
+        if _PARAM_EXPECTED_EXCTYPE in params:
+            setattr(target, _PARAM_EXPECTED_EXCTYPE, params[_PARAM_EXPECTED_EXCTYPE])
         
         return None
 
@@ -420,6 +447,7 @@ class _Decorator(Generic[_P]):
         self._parametrize_unit = None
         self._ptms = []
         self._returns_target_already = False
+        self._expected_exctype = None
 
     def __call__(self, target: _CA) -> _CA:
         if self._returns_target_already:
@@ -428,7 +456,11 @@ class _Decorator(Generic[_P]):
                 f"but the decorator has already finished."
             )
         
-        shortcut = self._op._process_target(target)
+        shortcut = self._op._process_target(
+            target, {
+                _PARAM_EXPECTED_EXCTYPE: self._expected_exctype
+            }
+        )
         if shortcut is not None:
             self._returns_target_already = True
             return shortcut
@@ -458,6 +490,10 @@ class _Decorator(Generic[_P]):
     @property
     def SKIP(self) -> Self:
         return self.skip
+
+    def raises(self, exctype: type[BaseException]):
+        self._expected_exctype = exctype
+        return self
 
     def ptm(self, *pytestmark) -> Self:
         self._ptms.extend(pytestmark)
@@ -654,9 +690,9 @@ class ScenarioLabel(Generic[_P]):
     def violation(self) -> _Decorator[_P]:
         return self._deco_creator._d(self.PREFIX + "violation")
     
-    @property
-    def raises(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "raises")
+    # @property
+    # def raises(self) -> _Decorator[_P]:
+    #     return self._deco_creator._d(self.PREFIX + "raises")
     
     @property
     def recovers(self) -> _Decorator[_P]:
@@ -751,9 +787,9 @@ class Label(Generic[_P]):
     def violation(self) -> _Decorator[_P]:
         return self._d("violation")
     
-    @property
-    def raises(self) -> _Decorator[_P]:
-        return self._d("raises")
+    # @property
+    # def raises(self) -> _Decorator[_P]:
+    #     return self._d("raises")
     
     @property
     def recovers(self) -> _Decorator[_P]:
@@ -796,6 +832,11 @@ class Ex(
 ):
     def _create_picker_operation(self) -> _DispatcherPicker:
         return _DispatcherPicker()
+    
+    @property
+    def raises(self) -> Callable[[type[BaseException]], _Decorator]:
+        deco = self._d(None)
+        return deco.raises
 
 
 class _SpecNamespace(dict):
@@ -999,12 +1040,14 @@ class _SpecMeta(type):
         if is_d_async:
             async def ex_test_async(self, **kwargs):
                 bound_act = getattr(self, act_name)
+                ex_param_def.add_implicitly_params(dispatcher, kwargs)
                 params_bridge = ex_param_def.get_bridge(bound_act, kwargs)
                 await bound_disp_getter()(params_bridge)
             generated_test = ex_test_async
         else:
             def ex_test(self, **kwargs):
                 bound_act = getattr(self, act_name)
+                ex_param_def.add_implicitly_params(dispatcher, kwargs)
                 params_bridge = ex_param_def.get_bridge(bound_act, kwargs)
                 bound_disp_getter()(params_bridge)
             generated_test = ex_test
