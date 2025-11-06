@@ -333,18 +333,35 @@ def _ensure_valid_param_names_as_param_bridge(pname: str):
 @dataclass(slots = True, frozen = True)
 class _ParamsBridge:
 
-    _ParamsBridge_act: Callable
+    _ParamsBridge_act: Callable[..., Any]
     _ParamsBridge_params: MappingProxyType[str, Any]
 
     @property
     def act(self):
         return self._ParamsBridge_act
 
+    # def __getattr__(self, key):
+    #     params = object.__getattribute__(self, "_ParamsBridge_params")
+    #     if key in params:
+    #         return params[key]
+        
+    #     available = ", ".join(params.keys())
+    #     raise AttributeError(
+    #         f"'{type(self).__name__}' has no attribute '{key}'. "
+    #         f"Available: {available}"
+    #     )
+
     def __getattr__(self, key):
         params = object.__getattribute__(self, "_ParamsBridge_params")
+
         if key in params:
             return params[key]
-        
+
+        if key.startswith("_") and "__" in key and key.index("__") > 1:
+            suffix = key[key.index("__"):]
+            if suffix in params:
+                return params[suffix]
+
         available = ", ".join(params.keys())
         raise AttributeError(
             f"'{type(self).__name__}' has no attribute '{key}'. "
@@ -372,26 +389,28 @@ class _DispatcherPicker(_AbstractPicker):
         if len(sig.parameters) > 2:
             raise TypeError(
                 "Dispatcher function can only have 'owner' and/or one parameters"
-                f"(Which must have '{PRM.__name__}' as its default), "
+                f"(Which must have '{PRM.__name__}' "
+                "as its default or type annotation), "
                 f"but received a dispatcher with 'fn{sig}'."
             )
-        found_sig = False
+        found_prm = False
         for k, v in sig.parameters.items():
             if isinstance(v.default, PRM):
-                if found_sig:
+                if found_prm:
                     raise TypeError(
                         f"Multiple {PRM.__name__} found. Last one is on '{k}'."
                     )
-                found_sig = True
-                setattr(target, _ACT_PARAM_NAME, k)
+                found_prm = True
+                #setattr(target, _ACT_PARAM_NAME, k)
                 setattr(target, _ACT_SIGNATURE, v.default)
-        if not found_sig:
-            raise TypeError(
-                "Parameter definition for act function is not found. "
-                f"Dispatcher function must have {PRM.__name__} object as a default "
-                "on one of its parameters."
-            )
-        
+        # if not found_prm:
+        #     raise TypeError(
+        #         "Parameter definition for act function is not found. "
+        #         f"Dispatcher function must have {PRM.__name__} object as a default "
+        #         "on one of its parameters."
+        #     )
+        if not found_prm:
+            setattr(target, _ACT_SIGNATURE, PRM())
         setattr(target, _TARGET_KIND, TargetKind.EX_SPEC_DISPATCHER)
         
         return None
@@ -966,11 +985,11 @@ class _SpecMeta(type):
     def _create_act_bridge(mcls, act: Callable) -> Callable:
         if inspect.iscoroutinefunction(act):
             async def act_for_dispatcher_async(self, *args, **kwargs):
-                await act(self, *args, **kwargs)
+                return await act(self, *args, **kwargs)
             generated_act = act_for_dispatcher_async
         else:
             def act_for_dispatcher(self, *args, **kwargs):
-                act(self, *args, **kwargs)
+                return act(self, *args, **kwargs)
             generated_act = act_for_dispatcher
         
         return generated_act
@@ -994,7 +1013,7 @@ class _SpecMeta(type):
         else:
             # For dispatcher defined on top-level.
             bound_disp_getter = lambda: dispatcher
-        act_param_name = getattr(dispatcher, _ACT_PARAM_NAME)
+        #act_param_name = getattr(dispatcher, _ACT_PARAM_NAME)
         generated_test = None
         if is_d_async:
             async def ex_test_async(self, **kwargs):
