@@ -4,125 +4,112 @@
 
 The following is reproduced from `__init__.py`.
 
+# speclike
+
+`speclike` is a **pytest helper library** designed to define tests in a more structured and expressive way.  
+It provides a declarative approach for building tests from two complementary perspectives:
+
+- **Individual test bodies**, written as ordinary methods.
+- **Externally defined dispatchers and actors**, representing scenario-driven or behavior-based tests.
+
+The framework automatically generates executable pytest test functions (`test_...`) from decorated functions and classes.
+
+---
+
+## 🧩 Core Concepts
+
+### 1. `Spec` and `ExSpec` Classes
+- **`Spec`** — the main base class for declarative test specifications.  
+  It manages auto-generated tests and delegates execution through `dispatch()` or `dispatch_async()`.
+- **`ExSpec`** — groups externally defined dispatchers (functions that control test flow outside of the class).
+
+Both are implemented using metaclasses (`_SpecMeta`, `_ExSpecMeta`) that synthesize pytest-compatible test functions during class creation.
+
+---
+
+### 2. `Case` and `Ex` Decorators
+- **`Case`** — marks individual test bodies or actor functions (`def _(...):`) within a `Spec` class.  
+  It can attach pytest marks, parametrize data, or skip tests dynamically.
+- **`Ex`** — marks dispatcher functions used in `ExSpec` or top-level definitions.  
+  Dispatchers define parameter structure using `PRM`, and connect to actors via `@case.ex(dispatcher)`.
+
+---
+
+### 3. `PRM` (Parameter Prefix Rules)
+Defines how test parameters behave and interact between dispatcher and actor.
+
+| Prefix | Kind | Behavior |
+|---------|------|-----------|
+| `_` | AO (Actor-Only) | Created by dispatcher, passed to actor (not parametrized) |
+| *(none)* | AP (Actor-Parametrized) | Parametrized and passed to actor |
+| `__` | PO (Param-Only) | Parametrized but **not** passed to actor (used for assertions) |
+
+Parameter ordering must follow `AO → AP → PO`.
+
+`PRM` validates actor signatures, generates pytest parametrization, and bridges runtime values through `_ParamsBridge`.
+
+---
+
+### 4. `Dispatcher` and `Actor`
+- **Dispatcher**: a function decorated with `@ex` that defines test input combinations using `PRM`.
+- **Actor**: a function named `_` decorated with `@case.ex(dispatcher)` that performs the actual behavior under test.
+- The library automatically links each actor to its dispatcher and generates a `test_<dispatcher>` method that executes the pair.
+
+---
+
+### 5. Test Generation Workflow
+1. The metaclass scans for decorated functions (`TargetKind`).
+2. Each test body or dispatcher/actor pair is converted into a pytest-visible `test_...` function.
+3. Signatures, parametrization, and pytest marks are copied to preserve readability and IDE support.
+4. For external specs (`ExSpec`), tests are created dynamically based on defined dispatchers.
+
+---
+
+### 6. Highlights
+- Strong signature validation for actors against their `PRM` definitions.
+- Automatic propagation of `pytest.mark.parametrize` and other pytest marks.
+- Source location (`co_firstlineno`) is preserved for accurate traceback references.
+- Supports both sync and async test execution paths.
+
+---
+
+### Example
+
 ```python
-"""speclike
+from speclike import Spec, PRM
 
-A helper library for pytest that aims to make test code clearer, more structured,  
-and easier to reuse.
+# Example domain object
+class Context:
+    def compute(self, x: int) -> int:
+        return x * 10
 
-It divides tests into two conceptual types:
-    - Externally defined tests — intended for **reusing test logic** across multiple cases
-    - Individual tests — written directly as single, self-contained test methods
+# Get decorators
+case, ex = Spec.get_decorators()
 
-Externally defined tests are composed of **two function definitions** that together form a single test:
+# Dispatcher (external). Parameters are NOT taken as direct function args.
+# Access AP/PO values via the bridge `p`, and call the actor via `p.act(...)`.
+@ex.follows(
+    [(1, 10), (2, 20), (3, 30)],  # (value, __expected)
+    ids=["x1", "x2", "x3"]
+)
+def check(p = PRM(_ctx=Context, value=int, __expected=int)):
+    ctx = Context()                             # AO: create here
+    result = p.act(_ctx=ctx, value=p.value)     # call actor with AO/AP
+    assert result == p.__expected               # PO: only used in dispatcher
 
-    Dispatcher:
-        Defines the *Arrange* and *Assert* phases of the AAA testing pattern.  
-        Acts as a reusable test logic template.  
-        Declares its expected *Act* function (the behavior under test)  
-        using a `Sig` object as the default value of one parameter.
+# Spec class with actor method named "_"
+class TestCompute(Spec):
+    @case.ex(check)
+    def _(self, _ctx: Context, value: int) -> int:
+        # Actor receives AO/AP only, in the declared order.
+        return _ctx.compute(value)
+````
 
-    Actor:
-        Defines the *Act* phase.  
-        It is invoked from within the dispatcher and contains the code that exercises the target behavior.  
-        The actor explicitly specifies which dispatcher it belongs to by using `@case.ex(...)`.
+At runtime, this generates:
 
-The placement of these functions is as follows:
+* `test_check` — a parametrized pytest function executing the dispatcher.
+* `act_for_check` — an internal bound actor function used by the dispatcher.
 
-    Dispatcher:
-        - Defined either at the module level or inside a class inheriting from `ExSpec`.
-        - Must have one parameter whose default value is a `Sig(...)` object.  
-          The keys of `Sig` specify the argument names and their expected types.
-
-    Actor:
-        - Defined inside a class inheriting from `Spec`.
-        - Decorated with `@case.ex(dispatcher)` to bind it to a dispatcher.
-        - The method name must be `"_"` (underscore).  
-          The generated test name is automatically derived from the dispatcher name.
-
-    Individual tests:
-        - Defined inside a class inheriting from `Spec`.
-        - They behave as normal pytest-compatible test methods.
-
-All of these definitions use decorators provided by the `_Case` and `_Ex` classes,
-which handle labeling and parametrization.
-
----
-
-### Signature Definition via `Sig`
-
-`Sig` defines the expected signature of the actor function.
-Each keyword argument represents a parameter name and its type.
-
-Example:
-    ```python
-    from speclike import ExSpec, Spec, Sig
-
-    case, ex = Spec.get_decorators()
-
-    # Dispatcher definition
-    @ex.edge_pass.follows(-1, 0, 1)
-    def check_near_zero(act = Sig(value=int)):
-        act(value)  # expect success, no exception
-    ```
-
-This declares that the corresponding actor must have a method signature:
-    `def _(self, value: int): ...`
-
-If the actor’s parameters differ from those declared by `Sig`,
-a descriptive error message is automatically generated during test collection.
-
----
-
-### Actor Definition
-
-The actor provides the *Act* behavior and is bound to a dispatcher via `@case.ex`.
-
-Example:
-    ```python
-    class SpecCheckNearZero(Spec):
-        @case.ex(check_near_zero)
-        def _(self, value: int):
-            target_func(value)
-    ```
-
-This actor is automatically paired with the dispatcher `check_near_zero`
-and generates a pytest-compatible test function named `test_check_near_zero`.
-
----
-
-### Labeling and Parametrization
-
-Both `_Case` and `_Ex` decorators provide convenient labeling and parametrization helpers:
-- Labels such as `@ex.edge`, `@case.feature`, `@case.error`, etc.
-- Parametrization through `.follows()`, which generates
-  `pytest.mark.parametrize` based on the function’s parameters.
-
-Example:
-    ```python
-    @ex.feature.follows(-10, 0, 10)
-    def within_bounds(act = Sig(value=int)):
-        act(value)
-    ```
-
----
-
-### Notes
-
-- `@case.ex(...)` must be used on methods named `"_"`.
-- Automatic test generation currently applies only to classes inheriting from `Spec`.
-- The API is still under development and may change, though most semantics are now stable.
-
-"""
-
-from speclike.speclike import Spec, ExSpec, Sig
-
-__all__ = [
-    "Spec", "ExSpec", "Sig"
-]
-
-
-```
 
 Installation
 
