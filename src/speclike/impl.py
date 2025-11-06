@@ -116,9 +116,9 @@ class PRM:
     
     Usage:
         @ex.follows((1, 10), (2, 20))  
-        def check(act=Sig(_ctx=Context, input=int, __expected=int)):  
-            ctx = Context()  
-            result = act(_ctx=ctx, input=input)  
+        def check(p = PRM(_ctx=Context, input=int, __expected=int)):  
+            _ctx = Context()  
+            result = p.act(_ctx, p.input)  
             assert result == __expected  
     """
 
@@ -189,6 +189,8 @@ class PRM:
             
             if current_kind == Kind.PO or current_kind == Kind.AP:
                 parametrize_names.append(k)
+
+            prev_kind = current_kind
             
         self._parameter_defs = parameter_defs
         self._act_param_defs = act_param_defs
@@ -378,7 +380,7 @@ class _DispatcherPicker(_AbstractPicker):
             if isinstance(v.default, PRM):
                 if found_sig:
                     raise TypeError(
-                        f"Multiple Sig found. Last one is on '{k}'."
+                        f"Multiple {PRM.__name__} found. Last one is on '{k}'."
                     )
                 found_sig = True
                 setattr(target, _ACT_PARAM_NAME, k)
@@ -964,7 +966,7 @@ class _SpecMeta(type):
     def _create_act_bridge(mcls, act: Callable) -> Callable:
         if inspect.iscoroutinefunction(act):
             async def act_for_dispatcher_async(self, *args, **kwargs):
-                act(self, *args, **kwargs)
+                await act(self, *args, **kwargs)
             generated_act = act_for_dispatcher_async
         else:
             def act_for_dispatcher(self, *args, **kwargs):
@@ -1059,7 +1061,7 @@ class _SpecMeta(type):
             co_filename=src.__code__.co_filename,
         )
         dst.__code__ = code
-        dst.__module__ = dst.__module__
+        dst.__module__ = src.__module__
         return dst
     
     @classmethod
