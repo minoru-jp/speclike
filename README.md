@@ -106,89 +106,82 @@ At runtime, this generates:
 
 ---
 
----
+## Labeling Decorator (Case / Ex)
 
-## 🧱 Decorator Creation Layer
-
-### Overview
-
-The *Decorator Creation Layer* defines how decorators are generated, labeled, and applied in **speclike**.
-It provides the foundation for `@case` and `@ex`, ensuring that both ordinary test bodies and dispatcher-driven actors can be declared in a unified, readable form.
-
-This layer is responsible for:
-
-* Generating consistent decorator instances for tests and actors.
-* Providing label-based classification (`api`, `feature`, `edge`, etc.).
-* Managing scenario-oriented labeling (`scenario.init`, `scenario.cleanup_fail`, etc.).
-* Linking external dispatchers and actors through structured decorators.
-
----
-
-### Label-Based Test Definitions
-
-Labels are used to categorize test functions according to their role or context.
-They can be attached to any regular test method defined inside a `Spec` class.
+The library provides a hierarchical labeling mechanism applied through decorators such as:
 
 ```python
-from speclike import Spec
-
-case, ex = Spec.get_decorators()
-
-class TestCalculation(Spec):
-    @case.api
-    def verifies_public_interface(self):
-        ...
-
-    @case.feature
-    def handles_standard_case(self):
-        ...
-
-    @case.edge_fail
-    def fails_on_invalid_input(self):
-        ...
+@case.api.input.default
+@case.network.timeout
+@case.tmp
 ```
 
-Each label corresponds to a specific internal decorator that `speclike` translates into a standard pytest test function.
-This labeling mechanism helps organize test intent without introducing extra configuration or naming conventions.
+Each decorator call selects one label from a navigable hierarchy:
 
----
+```
+Major → Intermediate → Minor
+```
 
-### Scenario Labels
-
-The `scenario` namespace provides additional labeling for multi-phase or behavior-driven test organization.
-It is useful when tests represent stages of a process or parts of a workflow.
+You may specify **0 to 3 labels**, and they can be combined simply by chaining attributes.
+The resulting labels are gathered and stored inside a single pytest mark:
 
 ```python
-class TestLifecycle(Spec):
-    @case.scenario.init
-    def initializes_resource(self):
-        ...
-
-    @case.scenario.feature
-    def performs_normal_operation(self):
-        ...
-
-    @case.scenario.cleanup
-    def releases_resources(self):
-        ...
+pytest.mark.speclike("api", "input", "default")
 ```
 
-Scenario-prefixed labels (`scenario.init`, `scenario.feature`, `scenario.cleanup`, etc.) behave like standard labels, but emphasize the role of the test within a broader execution flow.
+The decorator ensures this mark is always attached cleanly to the function’s `pytestmark`.
 
 ---
 
-* The dispatcher (`check`) defines parameter pairs `(value, __expected)` and invokes the actor via `p.act(...)`.
-* The actor (decorated with `@case.ex(check)`) implements the tested operation.
-* Both are automatically combined into a pytest test function (`test_check`).
+### How the Decorator Behaves
+
+When you write:
+
+```python
+@case.api.input.default
+def check_something(): ...
+```
+
+the decorator:
+
+1. Collects the labels `"api"`, `"input"`, `"default"`
+2. Normalizes the target’s `pytestmark` into a list
+3. Appends a `speclike(...)` mark containing those labels
+
+The mark is purely declarative: each decorated function carries structured metadata describing its classification.
 
 ---
 
-### Summary
+### Current Status of the `speclike` Marker
 
-The *Decorator Creation Layer* unifies labeling, test generation, and dispatcher–actor linking into a single mechanism.
-It allows consistent use of descriptive decorators while maintaining compatibility with pytest.
-Developers can structure tests declaratively — defining **what** to test (`Ex`) and **how** to test it (`Case`) — without additional configuration.
+A pytest marker named **`speclike` is already defined**,
+but **no runtime implementation, filtering logic, or pytest plugin behavior exists yet**.
 
+At this stage:
+
+* the marker is attached correctly
+* pytest recognizes it as a registered mark
+* **but it performs no special logic**
+* filtering such as `-m "speclike"` is possible,
+  yet argument-based filtering (`speclike("api")`) is **not implemented** until the plugin is created
+
+Implementation is planned for future development.
+
+---
+
+### Why This Classification Helps
+
+Even without a full plugin, the classification system already provides a strong structural benefit:
+
+* labels consistently encode feature areas, scenarios, or test intent
+* larger test suites become easier to navigate and reason about
+* test naming and grouping become more predictable
+* future tooling or plugins can rely on the embedded structure
+
+Once the `speclike` implementation is added, these labels will support richer filtering, reporting, 
+and domain-specific test behaviors—while keeping the decorator syntax compact and expressive.
+
+---
 
 Installation
 
