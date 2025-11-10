@@ -192,6 +192,83 @@ Developers can structure tests declaratively — defining **what** to test (`Ex`
 
 
 """
+"""
+# Labeling Decorator (Case / Ex)
+
+The library provides a hierarchical labeling mechanism applied through decorators such as:
+
+```python
+@case.api.input.default
+@case.network.timeout
+@case.tmp
+```
+
+Each decorator call selects one label from a navigable hierarchy:
+
+```
+Major → Intermediate → Minor
+```
+
+You may specify **0 to 3 labels**, and they can be combined simply by chaining attributes.
+The resulting labels are gathered and stored inside a single pytest mark:
+
+```python
+pytest.mark.speclike("api", "input", "default")
+```
+
+The decorator ensures this mark is always attached cleanly to the function’s `pytestmark`.
+
+---
+
+## How the Decorator Behaves
+
+When you write:
+
+```python
+@case.api.input.default
+def check_something(): ...
+```
+
+the decorator:
+
+1. Collects the labels `"api"`, `"input"`, `"default"`
+2. Normalizes the target’s `pytestmark` into a list
+3. Appends a `speclike(...)` mark containing those labels
+
+The mark is purely declarative: each decorated function carries structured metadata describing its classification.
+
+---
+
+## Current Status of the `speclike` Marker
+
+A pytest marker named **`speclike` is already defined**,
+but **no runtime implementation, filtering logic, or pytest plugin behavior exists yet**.
+
+At this stage:
+
+* the marker is attached correctly
+* pytest recognizes it as a registered mark
+* **but it performs no special logic**
+* filtering such as `-m "speclike"` is possible,
+  yet argument-based filtering (`speclike("api")`) is **not implemented** until the plugin is created
+
+Implementation is planned for future development.
+
+---
+
+## Why This Classification Helps
+
+Even without a full plugin, the classification system already provides a strong structural benefit:
+
+* labels consistently encode feature areas, scenarios, or test intent
+* larger test suites become easier to navigate and reason about
+* test naming and grouping become more predictable
+* future tooling or plugins can rely on the embedded structure
+
+Once the `speclike` implementation is added, these labels will support richer filtering, reporting, 
+and domain-specific test behaviors—while keeping the decorator syntax compact and expressive.
+
+"""
 
 from speclike.impl import Spec, ExSpec, PRM
 
