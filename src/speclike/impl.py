@@ -783,15 +783,6 @@ class Ex(Entry):
         return "ex"
 
     
-
-case = Case()
-@case.IMPORTANT.usecase.tmp
-def func():
-    pass
-
-
-pass
-
 class _SpecNamespace(dict):
     def __init__(self, cls_name: str):
         self.__cls_name = cls_name
