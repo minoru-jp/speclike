@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 import sys
 from types import GenericAlias, MappingProxyType
-from typing import Any, Callable, Generic, Protocol, Self, Type, TypeVar, cast, get_type_hints
+from typing import Any, Callable, Generic, Iterator, Protocol, Self, Type, TypeVar, cast, get_type_hints
 
 import inspect
 
@@ -76,7 +76,8 @@ class _TestBodyAndActorPicker(_AbstractPicker):
         return None
 
     def _get_ex_actor_decorator(
-        self, deco: _Decorator, ex_dispatcher: Callable
+        #self, deco: _Decorator, ex_dispatcher: Callable
+        self, deco: _Specifier, ex_dispatcher: Callable
     ) -> _ExActorDecorator:
         m = getattr(ex_dispatcher, _TARGET_KIND, None)
         error = m is None
@@ -419,7 +420,184 @@ class _DispatcherPicker(_AbstractPicker):
 
 _P = TypeVar("_P", bound = _AbstractPicker)
 
-class _Decorator(Generic[_P]):
+# class _Decorator(Generic[_P]):
+#     """
+#     single-use decorator.
+
+#     Each instance is disposable and cannot be reused once applied.  
+#     A function named "_" is treated as an actor of an externally defined spec.
+#     """
+
+#     def __init__(
+#         self,
+#         op: _P,
+#         # label: object | None = None,
+#         label_as_pytestmark: bool = False
+#     ):
+#         self._op = op
+#         # self._label = label
+#         self._label = None
+#         self._label_as_pytestmark = label_as_pytestmark
+#         self._parametrize_unit = None
+#         self._ptms = []
+#         self._returns_target_already = False
+#         self._expected_exctype = None
+
+#     def __call__(self, target: _CA) -> _CA:
+#         if self._returns_target_already:
+#             raise RuntimeError(
+#                 f"Attempted to process {target.__qualname__}, "
+#                 f"but the decorator has already finished."
+#             )
+        
+#         shortcut = self._op._process_target(
+#             target, {
+#                 _PARAM_EXPECTED_EXCTYPE: self._expected_exctype
+#             }
+#         )
+#         if shortcut is not None:
+#             self._returns_target_already = True
+#             return shortcut
+        
+#         self._prepare_pytestmark_attr_as_list(target)
+        
+#         if self._label_as_pytestmark and self._label is not None:
+#             if isinstance(self._label, str):
+#                 target.pytestmark.append(getattr(pytest.mark, self._label))
+#             else:
+#                 target.pytestmark.append(self._label)
+#         if self._parametrize_unit:
+#             setattr(target, _PARAMS_UNIT, self._parametrize_unit)
+#         target.pytestmark.extend(self._ptms)
+
+#         self._returns_target_already = True
+#         return target
+
+#     def follows(self, *argvalues, **options) -> Self:
+#         self._parametrize_unit = argvalues, options
+#         return self
+    
+#     @property
+#     def skip(self) -> Self:
+#         return self.ptm(pytest.mark.skip("User specified."))
+    
+#     @property
+#     def SKIP(self) -> Self:
+#         return self.skip
+
+#     def raises(self, exctype: type[BaseException]):
+#         self._expected_exctype = exctype
+#         return self
+
+#     def ptm(self, *pytestmark) -> Self:
+#         self._ptms.extend(pytestmark)
+#         return self
+
+#     def _prepare_pytestmark_attr_as_list(self, target: Callable) -> None:
+#         ptm = getattr(target, "pytestmark", None)
+#         if ptm:
+#             if not isinstance(ptm, list):
+#                 ptm = list(ptm)
+#         else:
+#             ptm = []
+#         setattr(target, "pytestmark", ptm)
+    
+#     def _get_picker(self) -> _P:
+#         return self._op
+    
+#     def _set_label(self, label_object: object | None):
+#         self._label = label_object
+
+
+# class _Specifier(Generic[_P]):
+#     """
+#     single-use decorator.
+
+#     Each instance is disposable and cannot be reused once applied.  
+#     A function named "_" is treated as an actor of an externally defined spec.
+#     """
+
+#     def __init__(
+#         self,
+#         op: _P,
+#         label_object: object | None = None,
+#         label_as_pytestmark: bool = False
+#     ):
+#         self._op = op
+#         self._label = label_object
+#         self._label = None
+#         self._label_as_pytestmark = label_as_pytestmark
+#         self._parametrize_unit = None
+#         self._ptms = []
+#         self._returns_target_already = False
+#         self._expected_exctype = None
+
+#     def __call__(self, target: _CA) -> _CA:
+#         if self._returns_target_already:
+#             raise RuntimeError(
+#                 f"Attempted to process {target.__qualname__}, "
+#                 f"but the decorator has already finished."
+#             )
+        
+#         shortcut = self._op._process_target(
+#             target, {
+#                 _PARAM_EXPECTED_EXCTYPE: self._expected_exctype
+#             }
+#         )
+#         if shortcut is not None:
+#             self._returns_target_already = True
+#             return shortcut
+        
+#         self._prepare_pytestmark_attr_as_list(target)
+        
+#         if self._label_as_pytestmark and self._label is not None:
+#             if isinstance(self._label, str):
+#                 target.pytestmark.append(getattr(pytest.mark, self._label))
+#             else:
+#                 target.pytestmark.append(self._label)
+#         if self._parametrize_unit:
+#             setattr(target, _PARAMS_UNIT, self._parametrize_unit)
+#         target.pytestmark.extend(self._ptms)
+
+#         self._returns_target_already = True
+#         return target
+
+#     def follows(self, *argvalues, **options) -> Self:
+#         self._parametrize_unit = argvalues, options
+#         return self
+    
+#     @property
+#     def skip(self) -> Self:
+#         return self.ptm(pytest.mark.skip("User specified."))
+    
+#     @property
+#     def SKIP(self) -> Self:
+#         return self.skip
+
+#     def raises(self, exctype: type[BaseException]):
+#         self._expected_exctype = exctype
+#         return self
+
+#     def ptm(self, *pytestmarks) -> Self:
+#         self._ptms.extend(pytestmarks)
+#         return self
+
+#     def _prepare_pytestmark_attr_as_list(self, target: Callable) -> None:
+#         ptm = getattr(target, "pytestmark", None)
+#         if ptm:
+#             if not isinstance(ptm, list):
+#                 ptm = list(ptm)
+#         else:
+#             ptm = []
+#         setattr(target, "pytestmark", ptm)
+    
+#     def _get_picker(self) -> _P:
+#         return self._op
+    
+#     def _set_label(self, label_object: object | None):
+#         self._label = label_object
+
+class _Specifier:
     """
     single-use decorator.
 
@@ -429,13 +607,11 @@ class _Decorator(Generic[_P]):
 
     def __init__(
         self,
-        op: _P,
-        label: object | None = None,
-        label_as_pytestmark: bool = False
+        op: _AbstractPicker,
+        label_objects: Iterator | None = None,
     ):
         self._op = op
-        self._label = label
-        self._label_as_pytestmark = label_as_pytestmark
+        self._label_objects = label_objects
         self._parametrize_unit = None
         self._ptms = []
         self._returns_target_already = False
@@ -458,12 +634,11 @@ class _Decorator(Generic[_P]):
             return shortcut
         
         self._prepare_pytestmark_attr_as_list(target)
-        
-        if self._label_as_pytestmark and self._label is not None:
-            if isinstance(self._label, str):
-                target.pytestmark.append(getattr(pytest.mark, self._label))
-            else:
-                target.pytestmark.append(self._label)
+
+        if self._label_objects is not None:
+            target.pytestmark.append(
+                getattr(pytest.mark, MOD_NAME)(*self._label_objects)
+            )
         if self._parametrize_unit:
             setattr(target, _PARAMS_UNIT, self._parametrize_unit)
         target.pytestmark.extend(self._ptms)
@@ -487,8 +662,8 @@ class _Decorator(Generic[_P]):
         self._expected_exctype = exctype
         return self
 
-    def ptm(self, *pytestmark) -> Self:
-        self._ptms.extend(pytestmark)
+    def ptm(self, *pytestmarks) -> Self:
+        self._ptms.extend(pytestmarks)
         return self
 
     def _prepare_pytestmark_attr_as_list(self, target: Callable) -> None:
@@ -499,9 +674,62 @@ class _Decorator(Generic[_P]):
         else:
             ptm = []
         setattr(target, "pytestmark", ptm)
+
+
+# _SPECIFIER_BRIDGE = Callable[[], _Specifier]
+
+# class _SpecifierBridge:
+#     def __init__(self, op, label_object, label_as_pytestmark):
+#         self._specifier = _Specifier(op, label_object, label_as_pytestmark)
     
-    def _get_picker(self) -> _P:
-        return self._op
+#     def __call__(self, target: _CA) -> _CA:
+#         return self._specifier(target)
+    
+#     def follows(self, *argsvalue, **options) -> _Specifier:
+#         return self._specifier.follows(*argsvalue, **options)
+
+
+#     @property
+#     def skip(self) -> _Specifier: # next target only.
+#         return self._specifier.skip
+    
+#     @property
+#     def SKIP(self) -> _Specifier: # next target only. 
+#         return self._specifier.SKIP
+    
+#     def raises(self, exctype: type[BaseException]) -> _Specifier: # next follows or target
+#         return self._specifier.raises(exctype)
+    
+#     def ptm(self, *pytestmarks) -> _Specifier: #
+#         return self._specifier.ptm(*pytestmarks)
+
+# class _SpecifierBridgeFactory(ABC):
+
+#     @abstractmethod
+#     def __call__(self, target: _CA) -> _CA:
+#         ...
+
+#     @abstractmethod
+#     def follows(self, *argsvalue, **options) -> _Specifier:
+#         ...
+
+#     @property
+#     @abstractmethod
+#     def skip(self) -> _Specifier:
+#         ...
+    
+#     @property
+#     @abstractmethod
+#     def SKIP(self) -> _Specifier:
+#         ...
+    
+#     @abstractmethod
+#     def raises(self, exctype: type[BaseException]) -> _Specifier:
+#         ...
+
+#     @abstractmethod
+#     def ptm(self, *pytestmarks) -> _Specifier:
+#         ...
 
 class _ExSpecNamespace(dict):
     def __init__(self, cls_name: str):
@@ -550,277 +778,860 @@ class ExSpec(metaclass = _ExSpecMeta):
     pass
 
 
-class _DecoratorCreator(Generic[_P], ABC):
-    """
-    Base provider of decorator instances.
+# class _DecoratorCreator(Generic[_P], ABC):
+#     """
+#     Base provider of decorator instances.
 
-    Inherit this class when implementing a custom decorator factory.
-    """
-    __slots__ = ("_as_pytestmark", "_passes", "_blocks")
+#     Inherit this class when implementing a custom decorator factory.
+#     """
+#     __slots__ = ("_as_pytestmark", "_passes", "_blocks")
 
-    def __init__(
-        self, as_pytestmark: bool = False, passes: tuple = (), blocks: tuple = ()
-    ):
-        if as_pytestmark and passes:
-            raise ValueError(
-                "passes can not be specified when as_pytestmark is True."
-            )
-        self._as_pytestmark = as_pytestmark
-        self._passes = passes
-        self._blocks = blocks
+#     def __init__(
+#         self, as_pytestmark: bool = False, passes: tuple = (), blocks: tuple = ()
+#     ):
+#         if as_pytestmark and passes:
+#             raise ValueError(
+#                 "passes can not be specified when as_pytestmark is True."
+#             )
+#         self._as_pytestmark = as_pytestmark
+#         self._passes = passes
+#         self._blocks = blocks
     
-    def __call__(self, target: _CA) -> _CA:
-        return self._d(None)(target)
+#     def __call__(self, target: _CA) -> _CA:
+#         return self._d(None)(target)
     
-    def follows(self, *argvalues, **options) -> _Decorator:
-        return self._d(None).follows(*argvalues, **options)
+#     def follows(self, *argvalues, **options) -> _Decorator:
+#         return self._d(None).follows(*argvalues, **options)
     
-    @property
-    def skip(self) -> _Decorator:
-        return self._d(None).skip
+#     @property
+#     def skip(self) -> _Decorator:
+#         return self._d(None).skip
     
-    @property
-    def SKIP(self) -> _Decorator:
-        return self.skip
+#     @property
+#     def SKIP(self) -> _Decorator:
+#         return self.skip
 
-    def ptm(self, *pytestmark) -> _Decorator:
-        return self._d(None).ptm(*pytestmark)
+#     def ptm(self, *pytestmark) -> _Decorator:
+#         return self._d(None).ptm(*pytestmark)
     
-    def _d(self, label_object: object | None) -> _Decorator[_P]:
-        passes = self._as_pytestmark
-        passes |= bool(self._passes and (label_object in self._passes))
-        passes &= label_object not in self._blocks
-        picker_operation = self._create_picker_operation()
-        return _Decorator[_P](picker_operation, label_object, passes)
+#     def _d(self, label_object: object | None) -> _Decorator[_P]:
+#         passes = self._as_pytestmark
+#         passes |= bool(self._passes and (label_object in self._passes))
+#         passes &= label_object not in self._blocks
+#         picker_operation = self._create_picker_operation()
+#         return _Decorator[_P](picker_operation, label_object, passes)
     
-    def _get_instance(self) -> _DecoratorCreator[_P]:
+#     def _get_instance(self) -> _DecoratorCreator[_P]:
+#         return self
+    
+#     @abstractmethod
+#     def _create_picker_operation(self) -> _P:
+#         ...
+
+# class ScenarioLabel(Generic[_P]):
+
+#     LABEL = "scenario"
+#     PREFIX = LABEL + "_"
+    
+#     def __init__(self, deco_creator: _DecoratorCreator[_P]):
+#         self._deco_creator = deco_creator
+
+#     def __call__(self, target: _CA) -> _CA:
+#         return self._deco_creator._d(self.LABEL).__call__(target)
+
+#     def follows(self, *argvalues, **options) -> _Decorator:
+#         return self._deco_creator._d(self.LABEL).follows(*argvalues, **options)
+    
+#     @property
+#     def skip(self) -> _Decorator:
+#         return self._deco_creator._d(self.LABEL).skip
+    
+#     @property
+#     def SKIP(self) -> _Decorator:
+#         return self._deco_creator.skip
+
+#     def ptm(self, *pytestmark) -> _Decorator:
+#         return self._deco_creator._d(self.LABEL).ptm(*pytestmark)
+
+#     @property
+#     def api(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "api")
+    
+#     @property
+#     def usecase(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "usecase")
+
+#     @property
+#     def feature(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "feature")
+    
+#     @property
+#     def default(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "default")
+    
+#     @property
+#     def init(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "init")
+    
+#     @property
+#     def init_fail(self) ->_Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "init_fail")
+    
+#     @property
+#     def cleanup(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "cleanup")
+    
+#     @property
+#     def cleanup_fail(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "cleanup_fail")
+    
+#     @property
+#     def edge(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "edge")
+
+#     @property
+#     def edge_pass(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "edge_pass")
+    
+#     @property
+#     def edge_fail(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "edge_fail")
+    
+#     @property
+#     def legacy(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "legacy")
+    
+#     @property
+#     def legacy_fail(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "legacy_fail")
+    
+#     @property
+#     def violation(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "violation")
+    
+#     @property
+#     def recovers(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "recovers")
+    
+#     @property
+#     def error(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "error")
+    
+#     @property
+#     def critical(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "critical")
+    
+#     @property
+#     def silent(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "silent")
+    
+#     @property
+#     def NOTE(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "NOTE")
+    
+#     @property
+#     def IMPORTANT(self) -> _Decorator[_P]:
+#         return self._deco_creator._d(self.PREFIX + "IMPORTANT")
+
+
+# class Label(Generic[_P]):
+#     """Mixin for creating decorators tied to a specific label."""
+
+#     _d: Callable[[Any], _Decorator[_P]]
+#     _get_instance: Callable[[], _DecoratorCreator[_P]]
+
+#     __slots__ = ()
+
+#     @property
+#     def scenario(self) -> ScenarioLabel:
+#         return ScenarioLabel(self._get_instance())
+
+#     @property
+#     def api(self) -> _Decorator[_P]:
+#         return self._d("api")
+    
+#     @property
+#     def usecase(self) -> _Decorator[_P]:
+#         return self._d("usecase")
+
+#     @property
+#     def feature(self) -> _Decorator[_P]:
+#         return self._d("feature")
+    
+#     @property
+#     def default(self) -> _Decorator[_P]:
+#         return self._d("default")
+    
+#     @property
+#     def init(self) -> _Decorator[_P]:
+#         return self._d("init")
+    
+#     @property
+#     def init_fail(self) ->_Decorator[_P]:
+#         return self._d("init_fail")
+    
+#     @property
+#     def cleanup(self) -> _Decorator[_P]:
+#         return self._d("cleanup")
+    
+#     @property
+#     def cleanup_fail(self) -> _Decorator[_P]:
+#         return self._d("cleanup_fail")
+    
+#     @property
+#     def edge(self) -> _Decorator[_P]:
+#         return self._d("edge")
+
+#     @property
+#     def edge_pass(self) -> _Decorator[_P]:
+#         return self._d("edge_pass")
+    
+#     @property
+#     def edge_fail(self) -> _Decorator[_P]:
+#         return self._d("edge_fail")
+    
+#     @property
+#     def legacy(self) -> _Decorator[_P]:
+#         return self._d("legacy")
+    
+#     @property
+#     def legacy_fail(self) -> _Decorator[_P]:
+#         return self._d("legacy_fail")
+    
+#     @property
+#     def violation(self) -> _Decorator[_P]:
+#         return self._d("violation")
+    
+#     @property
+#     def recovers(self) -> _Decorator[_P]:
+#         return self._d("recovers")
+    
+#     @property
+#     def error(self) -> _Decorator[_P]:
+#         return self._d("error")
+    
+#     @property
+#     def critical(self) -> _Decorator[_P]:
+#         return self._d("critical")
+    
+#     @property
+#     def silent(self) -> _Decorator[_P]:
+#         return self._d("silent")
+    
+#     @property
+#     def NOTE(self) -> _Decorator[_P]:
+#         return self._d("NOTE")
+    
+#     @property
+#     def IMPORTANT(self) -> _Decorator[_P]:
+#         return self._d("IMPORTANT")
+
+# class Label(_SpecifierBridgeFactory):
+#     __slots__ = ("_name", "_label_group")
+
+#     def __set_name__(self, owner, name):
+#         self._name = name
+    
+#     def __get__(self, ins, owner) -> Self:
+#         if ins is not None:
+#             print(f"xxxxxxxxxxxxxxTailLable received ins: {ins}")
+#             self._label_group = ins
+#         return self
+    
+#     def _create_specifier_bridge(self) -> _SpecifierBridge:
+#         if not hasattr(self, "_label_group"):
+#             raise RuntimeError("Owner is missing.")
+#         label = f"{self._label_group._get_name()}_{self._name}"
+#         return _SpecifierBridge(
+#             self._label_group._get_group_layer()._get_picker_operation(),
+#             label,
+#             self._label_group._get_group_layer()._sends_label_object_as_pytestmark(
+#                 label
+#             )
+#         )
+    
+#     def __call__(self, target: _CA) -> _CA:
+#         return self._create_specifier_bridge().__call__(target)
+
+#     def follows(self, *argsvalue, **options) -> _Specifier:
+#         return self._create_specifier_bridge().follows(*argsvalue, **options)
+
+#     @property
+#     def skip(self) -> _Specifier:
+#         return self._create_specifier_bridge().skip
+
+#     @property
+#     def SKIP(self) -> _Specifier:
+#         return self._create_specifier_bridge().SKIP
+
+#     def raises(self, exctype: type[BaseException]) -> _Specifier:
+#         return self._create_specifier_bridge().raises(exctype)
+
+#     def ptm(self, *pytestmarks) -> _Specifier:
+#         return self._create_specifier_bridge().ptm(*pytestmarks)
+
+
+# class SpeclikeDefaultLabelLayer:
+
+#     api = Label()
+#     usecase = Label()
+#     feature = Label()
+#     default = Label()
+#     init = Label()
+#     init_fail = Label()
+#     cleanup = Label()
+#     cleanup_fail = Label()
+#     edge = Label()
+#     edge_pass = Label()
+#     edge_fail = Label()
+#     stress = Label()
+#     legacy = Label()
+#     legacy_fail = Label()
+#     violation = Label()
+#     recovers = Label()
+#     error = Label()
+#     critical = Label()
+#     silent = Label()
+#     NOTE = Label()
+#     IMPORTANT = Label()
+
+# class LabelGroup(SpeclikeDefaultLabelLayer, _SpecifierBridgeFactory):
+#     __slots__ = ("_name", "_group_layer")
+
+#     def __set_name__(self, owner, name):
+#         self._name = name
+    
+#     def __get__(self, ins, owner) -> Self:
+#         if ins is not None:
+#             print(f"MiddleLable received ins: {ins}")
+#             self._group_layer = ins
+#         return self
+    
+#     def _get_group_layer(self):
+#         if not hasattr(self, "_entry"):
+#             raise RuntimeError("Owner is missing.")
+#         return self._group_layer
+    
+#     def _get_name(self):
+#         return self._name
+    
+#     def _create_specifier_bridge(self) -> _SpecifierBridge:
+#         if not hasattr(self, "_entry"):
+#             raise RuntimeError("Owner is missing.")
+#         return _SpecifierBridge(
+#             self._group_layer._get_picker_operation(),
+#             self._name,
+#             self._group_layer._sends_label_object_as_pytestmark(self._name)
+#         )
+
+    
+#     def __call__(self, target: _CA) -> _CA:
+#         return self._create_specifier_bridge().__call__(target)
+
+#     def follows(self, *argsvalue, **options) -> _Specifier:
+#         return self._create_specifier_bridge().follows(*argsvalue, **options)
+
+#     @property
+#     def skip(self) -> _Specifier:
+#         return self._create_specifier_bridge().skip
+
+#     @property
+#     def SKIP(self) -> _Specifier:
+#         return self._create_specifier_bridge().SKIP
+
+#     def raises(self, exctype: type[BaseException]) -> _Specifier:
+#         return self._create_specifier_bridge().raises(exctype)
+
+#     def ptm(self, *pytestmarks) -> _Specifier:
+#         return self._create_specifier_bridge().ptm(*pytestmarks)
+
+
+# class LabelGroupLayer(Generic[_P], ABC):
+#     __slots__ = ("_as_pytestmark", "_passes", "_blocks")
+    
+#     def __init__(
+#         self, as_pytestmark: bool = False, passes: tuple = (), blocks: tuple = ()
+#     ):
+#         if as_pytestmark and passes:
+#             raise ValueError(
+#                 "passes can not be specified when as_pytestmark is True."
+#             )
+#         self._as_pytestmark = as_pytestmark
+#         self._passes = passes
+#         self._blocks = blocks
+    
+#     # def __call__(self, target: _CA) -> _CA:
+#     #     return self._d(None)(target)
+    
+#     # def _d(self, label_object: object | None) -> _Specifier[_P]:
+#     #     passes = self._as_pytestmark
+#     #     passes |= bool(self._passes and (label_object in self._passes))
+#     #     passes &= label_object not in self._blocks
+#     #     #picker_operation = self._create_picker_operation()
+#     #     return _Specifier[_P](picker_operation, passes)
+#     #     #return _Decorator[_P](picker_operation, label_object, passes)
+
+#     def _sends_label_object_as_pytestmark(self, label_object: object | None) -> bool:
+#         passes = self._as_pytestmark
+#         passes |= bool(self._passes and (label_object in self._passes))
+#         passes &= label_object not in self._blocks
+#         return passes
+    
+#     @classmethod
+#     @abstractmethod
+#     def _get_picker_operation(cls) -> _AbstractPicker:
+#         ...
+    
+#     def _create_specifier_bridge(self) -> _SpecifierBridge:
+#         return _SpecifierBridge(
+#             self._get_picker_operation(),
+#             None,
+#             self._sends_label_object_as_pytestmark(None)
+#         )
+
+#     def _create_specifier(self) -> _Specifier:
+#         return _Specifier(self._get_picker_operation())
+    
+#     def __call__(self, target: _CA) -> _CA:
+#         return self._create_specifier_bridge().__call__(target)
+
+#     def follows(self, *argsvalue, **options) -> _Specifier:
+#         return self._create_specifier_bridge().follows(*argsvalue, **options)
+
+#     @property
+#     def skip(self) -> _Specifier:
+#         return self._create_specifier_bridge().skip
+
+#     @property
+#     def SKIP(self) -> _Specifier:
+#         return self._create_specifier_bridge().SKIP
+
+#     def raises(self, exctype: type[BaseException]) -> _Specifier:
+#         return self._create_specifier_bridge().raises(exctype)
+
+#     def ptm(self, *pytestmarks) -> _Specifier:
+#         return self._create_specifier_bridge().ptm(*pytestmarks)
+
+# class SpeclikeDefaultGroupLayer(LabelGroupLayer):
+
+#     usecase = LabelGroup()
+#     scenario = LabelGroup()
+#     input = LabelGroup()
+#     output = LabelGroup()
+#     io = LabelGroup()
+#     performance = LabelGroup()
+#     resource = LabelGroup()
+#     network = LabelGroup()
+#     concurrency = LabelGroup()
+#     regression = LabelGroup()
+#     experiment = LabelGroup()
+#     spike = LabelGroup()
+#      = LabelGroup()
+
+# class Case(SpeclikeDefaultGroupLayer, SpeclikeDefaultLabelLayer, _SpecifierBridgeFactory):
+#     @classmethod
+#     def _get_picker_operation(cls):
+#         return _TestBodyAndActorPicker()
+
+#     def ex(self, ex_dispatcher: Callable) -> _ExActorDecorator:
+#         sp = self._create_specifier()
+#         return sp._get_picker()._get_ex_actor_decorator(sp, ex_dispatcher)
+
+# class Ex(LabelGroupLayer, SpeclikeDefaultLabelLayer, _SpecifierBridgeFactory):
+#     @classmethod
+#     def _get_picker_operation(cls):
+#         return _DispatcherPicker()
+
+
+# NG = TypeVar("NG", bound = "Layer")
+
+# class Layer(Generic[NG], ABC):
+
+#     def __init__(self, root: "Segment | None" = None):
+#         self._root_segment = root
+    
+#     def __get_label_objects(self) -> list:
+#         label_objects = []
+#         segment = self._root_segment
+#         while segment:
+#             segment._get_label_object()
+
+#     @abstractmethod
+#     def _get_next_layer(cls, root: "Segment") -> NG:
+#         ...
+
+# class SpecifierBridge(Layer):
+#     def __call__(self, target: _CA) -> _CA:
+#         pass
+
+#     def follows(self, *argsvalue, **options) -> _Specifier:
+#         pass
+
+#     @property
+#     def skip(self) -> _Specifier:
+#         pass
+
+#     @property
+#     def SKIP(self) -> _Specifier:
+#         pass
+
+#     def raises(self, exctype: type[BaseException]) -> _Specifier:
+#         pass
+
+#     def ptm(self, *pytestmarks) -> _Specifier:
+#         pass
+
+#     def _get_next_layer(self, root: Segment) -> None:
+#         ...
+
+# class Segment(Generic[NG], ABC):
+#     def __set_name__(self, owner, name):
+#         self._assigned_name = name
+
+#     def __get__(self, ins: Layer[NG], owner: type[Layer[NG]]) -> NG:
+#         if ins is not None:
+#             nxt = ins._get_next_layer(self)
+#         if nxt is not None:
+#             return nxt
+#         else:
+#             raise TypeError(f"Missing next group.")
+    
+#     def _get_assigned_name(self) -> str:
+#         return self._assigned_name
+
+#     @abstractmethod
+#     def _get_label_object(cls) -> object:
+#         ...
+
+# class DefaultSegment2(Segment[SpecifierBridge]):
+#     def _get_label_object(self) -> str:
+#         return self._get_assigned_name()
+
+# class DefaultLayer2(Layer[SpecifierBridge]):
+#     usecase = DefaultSegment2()
+#     scenario = DefaultSegment2()
+#     input = DefaultSegment2()
+#     output = DefaultSegment2()
+#     io = DefaultSegment2()
+#     performance = DefaultSegment2()
+#     resource = DefaultSegment2()
+#     network = DefaultSegment2()
+#     concurrency = DefaultSegment2()
+#     regression = DefaultSegment2()
+#     experiment = DefaultSegment2()
+#     spike = DefaultSegment2()
+#     tmp = DefaultSegment2()
+
+#     def _get_next_layer(self, root: Segment) -> SpecifierBridge:
+#         return SpecifierBridge(root)
+    
+# class DefaultSegment1(Segment[DefaultLayer2]):
+#     def _get_label_object(self) -> str:
+#         return self._get_assigned_name()
+
+# class DefaultLayer1(SpecifierBridge, Layer[DefaultLayer2]):
+#     usecase = DefaultSegment1()
+#     scenario = DefaultSegment1()
+#     input = DefaultSegment1()
+#     output = DefaultSegment1()
+#     io = DefaultSegment1()
+#     performance = DefaultSegment1()
+#     resource = DefaultSegment1()
+#     network = DefaultSegment1()
+#     concurrency = DefaultSegment1()
+#     regression = DefaultSegment1()
+#     experiment = DefaultSegment1()
+#     spike = DefaultSegment1()
+#     tmp = DefaultSegment1()
+
+#     def _get_next_layer(self, root: Segment) -> DefaultLayer2:
+#         return DefaultLayer2(root)
+
+# class PickerSource:
+#     pass
+
+# class Case(DefaultLayer1, PickerSource):
+#     pass
+
+# class Ex(DefaultLayer1, PickerSource):
+#     pass
+
+# case = Case()
+# case.experiment
+
+
+
+
+# class Case(
+#     Label[_TestBodyAndActorPicker],
+#     _DecoratorCreator[_TestBodyAndActorPicker]
+# ):
+#     def _create_picker_operation(self) -> _TestBodyAndActorPicker:
+#         return _TestBodyAndActorPicker()
+    
+#     def ex(self, ex_dispatcher: Callable) -> _ExActorDecorator:
+#         deco = self._d(None)
+#         return deco._get_picker()._get_ex_actor_decorator(deco, ex_dispatcher)
+
+# class Ex(
+#     FirstLabel[_DispatcherPicker],
+#     _DecoratorCreator[_DispatcherPicker]
+# ):
+#     def _create_picker_operation(self) -> _DispatcherPicker:
+#         return _DispatcherPicker()
+    
+#     @property
+#     def raises(self) -> Callable[[type[BaseException]], _Decorator]:
+#         deco = self._d(None)
+#         return deco.raises
+
+class SpecifierSeed(ABC):
+    @classmethod
+    @abstractmethod
+    def _get_picker(cls) -> _AbstractPicker:
+        ...
+
+class Layer(ABC):
+    _MAX_DEPTH = 10
+
+    def __init__(self):
+        self._assigned_name = ""
+        self.__root = None
+
+    def __set_name__(self, owner, name):
+        self._assigned_name = name
+    
+    def __get__(self, ins, owner) -> Self:
+        self.__root = ins
         return self
     
     @abstractmethod
-    def _create_picker_operation(self) -> _P:
+    def _get_label(self) -> object:
         ...
 
-class ScenarioLabel(Generic[_P]):
+    def _get_specifier_unit(self) -> tuple["Entry", Iterator[object]]:
+        label_objects = []
+        layer = self
+        entry = None
+        for _ in range(self._MAX_DEPTH):
+            if isinstance(layer, Entry):
+                entry = layer
+            label = layer._get_label()
+            label_objects.append(label)
+            if layer.__root is not None:
+                layer = layer.__root
+                continue
+            else:
+                break
+        else:
+            raise RuntimeError(f"Too deep a layer structure: {self._MAX_DEPTH}")
+        
+        if entry is None:
+            raise RuntimeError(f"Entry is missing.")
 
-    LABEL = "scenario"
-    PREFIX = LABEL + "_"
+        return entry, reversed(label_objects)
+
+class Minor(Layer):
+    def _get_label(self) -> str:
+        return self._assigned_name
     
-    def __init__(self, deco_creator: _DecoratorCreator[_P]):
-        self._deco_creator = deco_creator
-
+    def _create_specifier(self) -> _Specifier:
+        entry, label_objects = self._get_specifier_unit()
+        picker = entry._get_picker()
+        return _Specifier(picker, label_objects)
+    
     def __call__(self, target: _CA) -> _CA:
-        return self._deco_creator._d(self.LABEL).__call__(target)
+        return self._create_specifier().__call__(target)
 
-    def follows(self, *argvalues, **options) -> _Decorator:
-        return self._deco_creator._d(self.LABEL).follows(*argvalues, **options)
-    
-    @property
-    def skip(self) -> _Decorator:
-        return self._deco_creator._d(self.LABEL).skip
-    
-    @property
-    def SKIP(self) -> _Decorator:
-        return self._deco_creator.skip
-
-    def ptm(self, *pytestmark) -> _Decorator:
-        return self._deco_creator._d(self.LABEL).ptm(*pytestmark)
+    def follows(self, *argsvalue, **options) -> _Specifier:
+        return self._create_specifier().follows(*argsvalue, **options)
 
     @property
-    def api(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "api")
-    
-    @property
-    def usecase(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "usecase")
+    def skip(self) -> _Specifier:
+        return self._create_specifier().skip
 
     @property
-    def feature(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "feature")
-    
-    @property
-    def default(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "default")
-    
-    @property
-    def init(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "init")
-    
-    @property
-    def init_fail(self) ->_Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "init_fail")
-    
-    @property
-    def cleanup(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "cleanup")
-    
-    @property
-    def cleanup_fail(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "cleanup_fail")
-    
-    @property
-    def edge(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "edge")
+    def SKIP(self) -> _Specifier:
+        return self._create_specifier().SKIP
 
-    @property
-    def edge_pass(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "edge_pass")
+    def raises(self, exctype: type[BaseException]) -> _Specifier:
+        return self._create_specifier().raises(exctype)
+
+    def ptm(self, *pytestmarks) -> _Specifier:
+        return self._create_specifier().ptm(*pytestmarks)
+
+class Intermediate(Layer):
+
+    def _get_label(self) -> str:
+        return self._assigned_name
     
-    @property
-    def edge_fail(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "edge_fail")
+    scenario = Minor()
+    performance = Minor()
+    resource = Minor()
+    network = Minor()
+    concurrency = Minor()
+    regression = Minor()
+    experiment = Minor()
+    tmp = Minor()
+
+    usecase = Minor()
+    api = Minor()
+    input = Minor()
+    output = Minor()
+    io = Minor()
+    feature = Minor()
     
-    @property
-    def legacy(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "legacy")
+    default = Minor()
+    init = Minor()
+    init_fail = Minor()
+    cleanup = Minor()
+    cleanup_fail = Minor()
+    edge = Minor()
+    edge_pass = Minor()
+    edge_fail = Minor()
+    stress = Minor()
+    legacy = Minor()
+    legacy_fail = Minor()
+    violation = Minor()
+    recovers = Minor()
+    error = Minor()
+    critical = Minor()
+    silent = Minor()
+    NOTE = Minor()
+    IMPORTANT = Minor()
+
+    security = Minor()
+    compatibility = Minor()
+    sync = Minor()
+    async_ = Minor()
+    timeout = Minor()
+
+class Major(Minor, Layer):
+
+    def _get_label(self) -> str:
+        return self._assigned_name
     
-    @property
-    def legacy_fail(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "legacy_fail")
+    scenario = Intermediate()
+    performance = Intermediate()
+    resource = Intermediate()
+    network = Intermediate()
+    concurrency = Intermediate()
+    regression = Intermediate()
+    experiment = Intermediate()
+    tmp = Intermediate()
+
+    usecase = Intermediate()
+    api = Intermediate()
+    input = Intermediate()
+    output = Intermediate()
+    io = Intermediate()
+    feature = Intermediate()
     
-    @property
-    def violation(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "violation")
+    default = Intermediate()
+    init = Intermediate()
+    init_fail = Intermediate()
+    cleanup = Intermediate()
+    cleanup_fail = Intermediate()
+    edge = Intermediate()
+    edge_pass = Intermediate()
+    edge_fail = Intermediate()
+    stress = Intermediate()
+    legacy = Intermediate()
+    legacy_fail = Intermediate()
+    violation = Intermediate()
+    recovers = Intermediate()
+    error = Intermediate()
+    critical = Intermediate()
+    silent = Intermediate()
+    NOTE = Intermediate()
+    IMPORTANT = Intermediate()
+
+    security = Intermediate()
+    compatibility = Intermediate()
+    sync = Intermediate()
+    async_ = Intermediate()
+    timeout = Intermediate()
+
+class Entry(Minor, SpecifierSeed, Layer):
+    def _get_label(self) -> str:
+        raise RuntimeError("Unexpected call.")
+
+    @abstractmethod
+    def _get_picker(self) -> _AbstractPicker:
+        ...
     
-    @property
-    def recovers(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "recovers")
+    scenario = Major()
+    performance = Major()
+    resource = Major()
+    network = Major()
+    concurrency = Major()
+    regression = Major()
+    experiment = Major()
+    tmp = Major()
+
+    usecase = Major()
+    api = Major()
+    input = Major()
+    output = Major()
+    io = Major()
+    feature = Major()
     
-    @property
-    def error(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "error")
-    
-    @property
-    def critical(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "critical")
-    
-    @property
-    def silent(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "silent")
-    
-    @property
-    def NOTE(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "NOTE")
-    
-    @property
-    def IMPORTANT(self) -> _Decorator[_P]:
-        return self._deco_creator._d(self.PREFIX + "IMPORTANT")
+    default = Major()
+    init = Major()
+    init_fail = Major()
+    cleanup = Major()
+    cleanup_fail = Major()
+    edge = Major()
+    edge_pass = Major()
+    edge_fail = Major()
+    stress = Major()
+    legacy = Major()
+    legacy_fail = Major()
+    violation = Major()
+    recovers = Major()
+    error = Major()
+    critical = Major()
+    silent = Major()
+    NOTE = Major()
+    IMPORTANT = Major()
+
+    security = Major()
+    compatibility = Major()
+    sync = Major()
+    async_ = Major()
+    timeout = Major()
 
 
-class Label(Generic[_P]):
-    """Mixin for creating decorators tied to a specific label."""
-
-    _d: Callable[[Any], _Decorator[_P]]
-    _get_instance: Callable[[], _DecoratorCreator[_P]]
-
-    __slots__ = ()
-
-    @property
-    def scenario(self) -> ScenarioLabel:
-        return ScenarioLabel(self._get_instance())
-
-    @property
-    def api(self) -> _Decorator[_P]:
-        return self._d("api")
-    
-    @property
-    def usecase(self) -> _Decorator[_P]:
-        return self._d("usecase")
-
-    @property
-    def feature(self) -> _Decorator[_P]:
-        return self._d("feature")
-    
-    @property
-    def default(self) -> _Decorator[_P]:
-        return self._d("default")
-    
-    @property
-    def init(self) -> _Decorator[_P]:
-        return self._d("init")
-    
-    @property
-    def init_fail(self) ->_Decorator[_P]:
-        return self._d("init_fail")
-    
-    @property
-    def cleanup(self) -> _Decorator[_P]:
-        return self._d("cleanup")
-    
-    @property
-    def cleanup_fail(self) -> _Decorator[_P]:
-        return self._d("cleanup_fail")
-    
-    @property
-    def edge(self) -> _Decorator[_P]:
-        return self._d("edge")
-
-    @property
-    def edge_pass(self) -> _Decorator[_P]:
-        return self._d("edge_pass")
-    
-    @property
-    def edge_fail(self) -> _Decorator[_P]:
-        return self._d("edge_fail")
-    
-    @property
-    def legacy(self) -> _Decorator[_P]:
-        return self._d("legacy")
-    
-    @property
-    def legacy_fail(self) -> _Decorator[_P]:
-        return self._d("legacy_fail")
-    
-    @property
-    def violation(self) -> _Decorator[_P]:
-        return self._d("violation")
-    
-    @property
-    def recovers(self) -> _Decorator[_P]:
-        return self._d("recovers")
-    
-    @property
-    def error(self) -> _Decorator[_P]:
-        return self._d("error")
-    
-    @property
-    def critical(self) -> _Decorator[_P]:
-        return self._d("critical")
-    
-    @property
-    def silent(self) -> _Decorator[_P]:
-        return self._d("silent")
-    
-    @property
-    def NOTE(self) -> _Decorator[_P]:
-        return self._d("NOTE")
-    
-    @property
-    def IMPORTANT(self) -> _Decorator[_P]:
-        return self._d("IMPORTANT")
-
-class Case(
-    Label[_TestBodyAndActorPicker],
-    _DecoratorCreator[_TestBodyAndActorPicker]
-):
-    def _create_picker_operation(self) -> _TestBodyAndActorPicker:
+class Case(Entry):
+    @classmethod
+    def _get_picker(cls) -> _TestBodyAndActorPicker:
         return _TestBodyAndActorPicker()
     
-    def ex(self, ex_dispatcher: Callable) -> _ExActorDecorator:
-        deco = self._d(None)
-        return deco._get_picker()._get_ex_actor_decorator(deco, ex_dispatcher)
+    def _get_label(self) -> str:
+        return "case"
 
-class Ex(
-    Label[_DispatcherPicker],
-    _DecoratorCreator[_DispatcherPicker]
-):
-    def _create_picker_operation(self) -> _DispatcherPicker:
+    def ex(self, ex_dispatcher: Callable) -> _ExActorDecorator:
+        picker = self._get_picker()
+        specifier = _Specifier(picker)
+        return picker._get_ex_actor_decorator(specifier, ex_dispatcher)
+    
+class Ex(Entry):
+    @classmethod
+    def _get_picker(cls) -> _AbstractPicker:
         return _DispatcherPicker()
     
-    @property
-    def raises(self) -> Callable[[type[BaseException]], _Decorator]:
-        deco = self._d(None)
-        return deco.raises
+    def _get_label(self) -> str:
+        return "ex"
 
+    
+
+case = Case()
+@case.IMPORTANT.usecase.tmp
+def func():
+    pass
+
+
+pass
 
 class _SpecNamespace(dict):
     def __init__(self, cls_name: str):
@@ -1103,15 +1914,18 @@ class Spec(metaclass = _SpecMeta):
     """
     __slots__ = ()
 
+    # @classmethod
+    # def get_decorators(
+    #     cls, as_pytestmark: bool = False, passes: tuple = (), blocks: tuple = ()
+    # ) -> tuple[Case, Ex]:
+    #     return Case(as_pytestmark, passes, blocks), Ex(as_pytestmark, passes, blocks)
+
     @classmethod
-    def get_decorators(
-        cls, as_pytestmark: bool = False, passes: tuple = (), blocks: tuple = ()
-    ) -> tuple[Case, Ex]:
-        return Case(as_pytestmark, passes, blocks), Ex(as_pytestmark, passes, blocks)
+    def get_decorators(cls) -> tuple[Case, Ex]:
+        return Case(), Ex()
 
     async def dispatch_async(self, name: str, actor: Callable, *args, **kwargs):
         await actor(*args, **kwargs)
     
     def dispatch(self, name: str, actor: Callable, *args, **kwargs):
         actor(*args, **kwargs)
-
