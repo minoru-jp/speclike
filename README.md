@@ -106,80 +106,143 @@ At runtime, this generates:
 
 ---
 
-## Labeling Decorator (Case / Ex)
+## Labeling Decorator System (`Case` / `Ex`)
 
-The library provides a hierarchical labeling mechanism applied through decorators such as:
+`speclike` provides a **hierarchical labeling system** for organizing and classifying tests in a flexible, domain-neutral way.
+
+Each decorator chain expresses **up to three levels of labels** (tiers), and the structure is enforced but not restricted to predefined words.
 
 ```python
 @case.api.input.default
-@case.network.timeout
 @case.tmp
+@case.network.timeout
 ```
 
-Each decorator call selects one label from a navigable hierarchy:
+Each decorator call selects one label per level, forming a hierarchical path such as:
 
 ```
-Major → Intermediate → Minor
+Primary → Secondary → Tertiary
 ```
 
-You may specify **0 to 3 labels**, and they can be combined simply by chaining attributes.
-The resulting labels are gathered and stored inside a single pytest mark:
-
-```python
-pytest.mark.speclike("api", "input", "default")
-```
-
-The decorator ensures this mark is always attached cleanly to the function’s `pytestmark`.
+You can specify between **0 and 3 levels**.
+All identifiers are **user-defined arbitrary strings**, validated dynamically by a user-provided validator.
 
 ---
 
-### How the Decorator Behaves
+### `Tier` Enumeration
+
+Internally, the classification levels are represented by the `Tier` enum:
+
+```python
+class Tier(Enum):
+    PRIMARY = 0
+    SECONDARY = auto()
+    TERTIARY = auto()
+```
+
+Each label belongs to one of these tiers, depending on its position in the decorator chain.
+
+---
+
+### `Label Validator`
+
+A **label validator** function can be provided to control or restrict allowed labels:
+
+```python
+def _custom_validator(tier: Tier, name: str):
+    if tier is Tier.PRIMARY and name not in {"api", "feature", "resource"}:
+        raise ValueError(f"Invalid primary label '{name}'")
+```
+
+Validators receive both the `Tier` and the `name` string.
+By default, `_ALL_ACCEPTS` is used, which allows all labels.
+
+Custom validators can be injected through the factory method:
+
+```python
+case, ex = Spec.get_decorators(case_label_validator=_custom_validator)
+```
+
+---
+
+### Decorator Behavior
 
 When you write:
 
 ```python
-@case.api.input.default
+@case.feature.io.default
 def check_something(): ...
 ```
 
 the decorator:
 
-1. Collects the labels `"api"`, `"input"`, `"default"`
-2. Normalizes the target’s `pytestmark` into a list
-3. Appends a `speclike(...)` mark containing those labels
+1. Collects the labels `["feature", "io", "default"]`
+2. Normalizes the target’s `pytestmark` list
+3. Appends a structured mark:
 
-The mark is purely declarative: each decorated function carries structured metadata describing its classification.
+   ```python
+   pytest.mark.speclike("feature", "io", "default")
+   ```
+4. Ensures this mark coexists cleanly with other pytest marks (`skip`, `parametrize`, etc.)
+
+---
+
+### Key Properties
+
+* Labels are **free-form identifiers**; any valid Python attribute name is accepted.
+* Only the **depth (up to 3 levels)** is enforced.
+* Each decorated function carries one consolidated mark (`pytest.mark.speclike(...)`).
+* Validators can enforce naming rules, prevent duplicates, or introduce domain semantics.
+
+---
+
+### Example Usage
+
+```python
+@case.api.input.default
+def test_api_input_default(): ...
+
+@case.tmp
+def test_tmp_behavior(): ...
+
+@ex.performance.load.stress
+def dispatcher(...): ...
+```
+
+Generates pytest marks such as:
+
+```python
+pytest.mark.speclike("api", "input", "default")
+pytest.mark.speclike("tmp")
+pytest.mark.speclike("performance", "load", "stress")
+```
 
 ---
 
 ### Current Status of the `speclike` Marker
 
-A pytest marker named **`speclike` is already defined**,
-but **no runtime implementation, filtering logic, or pytest plugin behavior exists yet**.
+A pytest marker named **`speclike`** is automatically attached to each decorated function.
+Currently:
 
-At this stage:
+* pytest recognizes and lists the mark
+* filtering such as `-m "speclike"` is available
+* argument-based filtering (`-m "speclike('api')"` or `--speclike`) is **not yet implemented**
 
-* the marker is attached correctly
-* pytest recognizes it as a registered mark
-* **but it performs no special logic**
-* filtering such as `-m "speclike"` is possible,
-  yet argument-based filtering (`speclike("api")`) is **not implemented** until the plugin is created
-
-Implementation is planned for future development.
+The next step will be a dedicated pytest plugin that interprets these structured labels for filtering, grouping, or reporting.
 
 ---
 
-### Why This Classification Helps
+### Why This Classification Matters
 
-Even without a full plugin, the classification system already provides a strong structural benefit:
+Even before plugin support, this classification brings major benefits:
 
-* labels consistently encode feature areas, scenarios, or test intent
-* larger test suites become easier to navigate and reason about
-* test naming and grouping become more predictable
-* future tooling or plugins can rely on the embedded structure
+* Consistent metadata describing **feature area**, **scenario**, or **intent**
+* Easier navigation of large test suites
+* Predictable naming and grouping for reports
+* A foundation for future tooling—custom filters, dashboards, or hierarchical reports
 
-Once the `speclike` implementation is added, these labels will support richer filtering, reporting, 
-and domain-specific test behaviors—while keeping the decorator syntax compact and expressive.
+Once the plugin is introduced, the `speclike` mark will enable **rich test selection and reporting**
+while keeping the decorator syntax simple and expressive.
 
 ---
 
