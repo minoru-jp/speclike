@@ -430,7 +430,6 @@ class _Specifier:
     def __init__(
         self,
         op: _AbstractPicker,
-        #label_objects: Iterator | None = None,
         label_objects: list[str]
     ):
         self._op = op
@@ -543,223 +542,6 @@ class ExSpec(metaclass = _ExSpecMeta):
     outside of a Spec class.
     """
     pass
-
-
-# class SpecifierSeed(ABC):
-#     @classmethod
-#     @abstractmethod
-#     def _get_picker(cls) -> _AbstractPicker:
-#         ...
-
-# class Layer(ABC):
-#     _MAX_DEPTH = 10
-
-#     def __init__(self):
-#         self._assigned_name = ""
-#         self.__root = None
-
-#     def __set_name__(self, owner, name):
-#         self._assigned_name = name
-    
-#     def __get__(self, ins, owner) -> Self:
-#         self.__root = ins
-#         return self
-    
-#     @abstractmethod
-#     def _get_label(self) -> object:
-#         ...
-
-#     def _get_specifier_unit(self) -> tuple["_Entry", Iterator[object]]:
-#         label_objects = []
-#         layer = self
-#         entry = None
-#         for _ in range(self._MAX_DEPTH):
-#             if isinstance(layer, _Entry):
-#                 entry = layer
-#             label = layer._get_label()
-#             label_objects.append(label)
-#             if layer.__root is not None:
-#                 layer = layer.__root
-#                 continue
-#             else:
-#                 break
-#         else:
-#             raise RuntimeError(f"Too deep a layer structure: {self._MAX_DEPTH}")
-        
-#         if entry is None:
-#             raise RuntimeError(f"Entry is missing.")
-
-#         return entry, reversed(label_objects)
-
-# class Minor(Layer):
-#     def _get_label(self) -> str:
-#         return self._assigned_name
-    
-#     def _create_specifier(self) -> _Specifier:
-#         entry, label_objects = self._get_specifier_unit()
-#         picker = entry._get_picker()
-#         return _Specifier(picker, label_objects)
-    
-#     def __call__(self, target: _CA) -> _CA:
-#         return self._create_specifier().__call__(target)
-
-#     def follows(self, *argsvalue, **options) -> _Specifier:
-#         return self._create_specifier().follows(*argsvalue, **options)
-
-#     @property
-#     def skip(self) -> _Specifier:
-#         return self._create_specifier().skip
-
-#     @property
-#     def SKIP(self) -> _Specifier:
-#         return self._create_specifier().SKIP
-
-#     def raises(self, exctype: type[BaseException]) -> _Specifier:
-#         return self._create_specifier().raises(exctype)
-
-#     def ptm(self, *pytestmarks) -> _Specifier:
-#         return self._create_specifier().ptm(*pytestmarks)
-
-# class Intermediate(Layer):
-
-#     def _get_label(self) -> str:
-#         return self._assigned_name
-    
-#     scenario = Minor()
-#     performance = Minor()
-#     resource = Minor()
-#     network = Minor()
-#     concurrency = Minor()
-#     regression = Minor()
-#     experiment = Minor()
-#     tmp = Minor()
-
-#     usecase = Minor()
-#     api = Minor()
-#     input = Minor()
-#     output = Minor()
-#     io = Minor()
-#     feature = Minor()
-    
-#     default = Minor()
-#     init = Minor()
-#     init_fail = Minor()
-#     cleanup = Minor()
-#     cleanup_fail = Minor()
-#     edge = Minor()
-#     edge_pass = Minor()
-#     edge_fail = Minor()
-#     stress = Minor()
-#     legacy = Minor()
-#     legacy_fail = Minor()
-#     violation = Minor()
-#     recovers = Minor()
-#     error = Minor()
-#     critical = Minor()
-#     silent = Minor()
-#     NOTE = Minor()
-#     IMPORTANT = Minor()
-
-#     security = Minor()
-#     compatibility = Minor()
-#     sync = Minor()
-#     async_ = Minor()
-#     timeout = Minor()
-
-# class Major(Minor, Layer):
-
-#     def _get_label(self) -> str:
-#         return self._assigned_name
-    
-#     scenario = Intermediate()
-#     performance = Intermediate()
-#     resource = Intermediate()
-#     network = Intermediate()
-#     concurrency = Intermediate()
-#     regression = Intermediate()
-#     experiment = Intermediate()
-#     tmp = Intermediate()
-
-#     usecase = Intermediate()
-#     api = Intermediate()
-#     input = Intermediate()
-#     output = Intermediate()
-#     io = Intermediate()
-#     feature = Intermediate()
-    
-#     default = Intermediate()
-#     init = Intermediate()
-#     init_fail = Intermediate()
-#     cleanup = Intermediate()
-#     cleanup_fail = Intermediate()
-#     edge = Intermediate()
-#     edge_pass = Intermediate()
-#     edge_fail = Intermediate()
-#     stress = Intermediate()
-#     legacy = Intermediate()
-#     legacy_fail = Intermediate()
-#     violation = Intermediate()
-#     recovers = Intermediate()
-#     error = Intermediate()
-#     critical = Intermediate()
-#     silent = Intermediate()
-#     NOTE = Intermediate()
-#     IMPORTANT = Intermediate()
-
-#     security = Intermediate()
-#     compatibility = Intermediate()
-#     sync = Intermediate()
-#     async_ = Intermediate()
-#     timeout = Intermediate()
-
-# class Entry(Minor, SpecifierSeed, Layer):
-#     def _get_label(self) -> str:
-#         raise RuntimeError("Unexpected call.")
-
-#     @abstractmethod
-#     def _get_picker(self) -> _AbstractPicker:
-#         ...
-    
-#     scenario = Major()
-#     performance = Major()
-#     resource = Major()
-#     network = Major()
-#     concurrency = Major()
-#     regression = Major()
-#     experiment = Major()
-#     tmp = Major()
-
-#     usecase = Major()
-#     api = Major()
-#     input = Major()
-#     output = Major()
-#     io = Major()
-#     feature = Major()
-    
-#     default = Major()
-#     init = Major()
-#     init_fail = Major()
-#     cleanup = Major()
-#     cleanup_fail = Major()
-#     edge = Major()
-#     edge_pass = Major()
-#     edge_fail = Major()
-#     stress = Major()
-#     legacy = Major()
-#     legacy_fail = Major()
-#     violation = Major()
-#     recovers = Major()
-#     error = Major()
-#     critical = Major()
-#     silent = Major()
-#     NOTE = Major()
-#     IMPORTANT = Major()
-
-#     security = Major()
-#     compatibility = Major()
-#     sync = Major()
-#     async_ = Major()
-#     timeout = Major()
 
 class Tier(Enum):
     PRIMARY = 0
@@ -881,27 +663,6 @@ class Ex(_Entry[_DispatcherPicker]):
     def __init__(self, validator: _LabelVaridator = _ALL_ACCEPTS):
         super().__init__("ex", _DispatcherPicker(), ["ex"], validator)
 
-
-case = Case()
-def add():...
-@case.io.io.io
-def abc():...
-
-class Fuga:
-    def __call__(self) -> int:
-        return 0
-
-class FugaAttr(Protocol):
-    pass
-
-class Hoge:
-    def __getattr__(self, key) -> FugaAttr:
-        return Fuga()
-
-h = Hoge()
-h.attr
-
-pass
 
 class _SpecNamespace(dict):
     def __init__(self, cls_name: str):
@@ -1183,10 +944,6 @@ class Spec(metaclass = _SpecMeta):
     call signatures or invocation behavior of generated tests.
     """
     __slots__ = ()
-
-    # @classmethod
-    # def get_decorators(cls) -> tuple[Case, Ex]:
-    #     return Case(), Ex()
 
     @classmethod
     def get_decorators(
