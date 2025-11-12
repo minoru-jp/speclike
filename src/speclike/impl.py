@@ -552,8 +552,7 @@ _LabelVaridator = Callable[[Tier, str], None]
 LABELS = list[str]
 
 def _ALL_ACCEPTS(tier: Tier, name: str):
-    if tier == Tier.PRIMARY and name == "tmp":
-        raise RuntimeError("ok")
+    pass
 
 _P = TypeVar("_P", bound = _AbstractPicker)
 
