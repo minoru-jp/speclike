@@ -45,7 +45,5 @@ package-dir = {"" = "src"}
 where = ["src"]
 include = ["speclike*"]
 
-[tool.pytest.ini_options]
-markers = [
-    "speclike: tag set marker",
-]
+[project.entry-points.pytest11]
+speclike = "speclike.plugin"
